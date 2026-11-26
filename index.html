@@ -3,28 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Oublier · 在这里逃离真实的世界</title>
+  <title>Oublier · 忘忧修道院 · 在这里逃离真实的世界</title>
   <link rel="stylesheet" href="styles/main.css" />
+  <script defer src="vendor/three.min.js"></script>
   <script defer src="src/data.js"></script>
   <script defer src="src/storage.js"></script>
   <script defer src="src/audio.js"></script>
+  <script defer src="src/models3d.js"></script>
   <script defer src="src/world.js"></script>
   <script defer src="src/ui.js"></script>
   <script defer src="src/app.js"></script>
 </head>
 <body class="mood-midnight">
-  <!-- 全屏岛屿世界画布 -->
-  <canvas id="world-canvas" aria-label="Oublier 忘忧屿世界"></canvas>
+  <!-- 全屏 3D 哥特岛屿画布 -->
+  <canvas id="world-canvas" aria-label="Oublier 3D 忘忧修道院"></canvas>
 
   <!-- 登岛前帷幕 -->
   <div id="entry-veil" class="entry-veil" role="dialog" aria-modal="true" aria-labelledby="entry-title">
     <div class="entry-card">
-      <div class="entry-eyebrow">ISLE OF FORGETTING · 忘忧屿</div>
+      <div class="entry-eyebrow">ABBEY OF FORGETTING · 忘忧修道院</div>
       <h1 id="entry-title" class="entry-title">Oublier</h1>
       <p class="entry-subtitle">在这里逃离真实的世界。</p>
       <p class="entry-desc">
-        不必带着现实里的头衔与待办清单。<br />
-        此刻你是谁都可以——只是吹吹海风、烤烤火，或静静待一会儿。
+        穿过黑夜与海雾，踏上这座寂静的海上哥特修道院。<br />
+        脱下现实里的头衔——在圣火坛、钟楼与回廊之间慢下来。
       </p>
 
       <div class="identity-box">
@@ -62,14 +64,14 @@
       <div class="brand-pill glass-pill">
         <span class="brand-dot" aria-hidden="true"></span>
         <span class="brand-name">Oublier</span>
-        <span class="brand-sep">·</span>
+        <span class="brand-sep">◇</span>
         <button id="btn-edit-identity" class="identity-trigger" type="button" title="更换今晚的临时身份">
           <span id="hud-identity-text">3号车厢的听雨人</span>
         </button>
       </div>
       <div class="stats-pill glass-pill" title="已释怀的心事 · 记忆星光">
         <span class="stat-item">释怀 <strong id="stat-released">0</strong></span>
-        <span class="stat-sep">·</span>
+        <span class="stat-sep">◇</span>
         <span class="stat-item">星光 <strong id="stat-stars">0</strong></span>
       </div>
     </header>
@@ -134,11 +136,22 @@
       <p class="sound-note">由浏览器实时合成，无需加载外部音频</p>
     </aside>
 
+    <!-- 左下角实时罗盘小地图 -->
+    <div id="minimap-box" class="minimap-box glass-panel" aria-label="忘忧修道院地图导览">
+      <span class="minimap-north">N</span>
+      <canvas id="minimap-canvas" width="136" height="136"></canvas>
+    </div>
+
     <!-- 底部上下文交互提示 -->
     <div id="hint-bar" class="hint-bar glass-pill">
-      <span id="hint-text">WASD / 方向键漫步，或点击岛上任意位置 · 靠近发光处按 E 交互</span>
+      <span id="hint-text">WASD / 方向键漫步 · 拖拽旋转视角 · 点击地标或按 E 交互</span>
     </div>
   </div>
+
+  <!-- 望海全景退出按钮 -->
+  <button id="btn-exit-overlook" class="overlook-exit glass-pill hidden" type="button">
+    回到旅人视角
+  </button>
 
   <!-- 发呆模式退出按钮 -->
   <button id="btn-exit-zen" class="zen-exit glass-pill hidden" type="button">

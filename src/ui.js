@@ -8,6 +8,7 @@
   let breathTimers = [];
   let bottleIndex = 0;
   let currentPromptIndex = 0;
+  let whisperIndex = 0;
   let zenMode = false;
 
   function $(id) {
@@ -63,7 +64,7 @@
       els.hintText.textContent = "按 E 或点击 · " + label + "（" + sub + "）";
       els.hintBar.classList.add("interactive");
     } else {
-      els.hintText.textContent = "WASD / 方向键漫步，或点击岛上任意位置 · 靠近发光处按 E 交互";
+      els.hintText.textContent = "WASD / 方向键漫步 · 拖拽旋转视角 · 点击地标或按 E 交互";
       els.hintBar.classList.remove("interactive");
     }
   }
@@ -112,18 +113,18 @@
     if (!el) return;
     setTimeout(function () {
       el.focus();
-    }, 0);
+    }, 90);
   }
 
-  /* 1. 遗忘篝火 */
+  /* 1. 遗忘圣火坛 */
   function openCampfireModal() {
     openModal(
       "campfire",
       '<div class="modal-eyebrow">HEARTH OF LETTING GO</div>' +
-        '<h2 class="modal-title">遗忘篝火</h2>' +
+        '<h2 class="modal-title">遗忘圣火坛</h2>' +
         '<p class="modal-lead">把今天让你觉得很重、很烦，或者一直卡在心里的一句话写下来。</p>' +
         '<textarea id="campfire-input" class="textarea-field" maxlength="300" placeholder="写下想暂时忘掉的事……"></textarea>' +
-        '<p class="modal-note">为了守住“Oublier”的约定，这些文字不会被保存或上传，只会化作火星升向夜空。</p>' +
+        '<p class="modal-note">为了守住“Oublier”的约定，这些文字不会被保存或上传，只会化作火星升向石拱之上。</p>' +
         '<div class="modal-actions">' +
         '  <button id="btn-campfire-cancel" class="btn-secondary" type="button">再待一会儿</button>' +
         '  <button id="btn-campfire-burn" class="btn-accent" type="button">投入火中</button>' +
@@ -137,7 +138,7 @@
     $("btn-campfire-burn").addEventListener("click", function () {
       const text = input ? input.value.trim() : "";
       if (!text) {
-        showToast("先在纸条上写下哪怕几个字，再交给篝火吧");
+        showToast("先在纸条上写下哪怕几个字，再交给圣火吧");
         if (input) input.focus();
         return;
       }
@@ -152,13 +153,13 @@
     });
   }
 
-  /* 2. 潮汐栈桥 · 漂流瓶 */
+  /* 2. 潮汐石栈桥 · 漂流瓶 */
   function openPierModal(initialTab) {
     const tab = initialTab || "read";
     openModal(
       "pier",
-      '<div class="modal-eyebrow">TIDE &amp; DRIFT BOTTLES</div>' +
-        '<h2 class="modal-title">潮汐栈桥</h2>' +
+      '<div class="modal-eyebrow">WATER GATE &amp; DRIFT BOTTLES</div>' +
+        '<h2 class="modal-title">潮汐石栈桥</h2>' +
         '<div class="tab-row">' +
         '  <button id="tab-bottle-read" class="tab-btn ' + (tab === "read" ? "active" : "") + '" type="button">捞一个瓶子</button>' +
         '  <button id="tab-bottle-write" class="tab-btn ' + (tab === "write" ? "active" : "") + '" type="button">投一个瓶子</button>' +
@@ -209,7 +210,7 @@
       const lit = Oublier.Storage.lightBottle(bottle.id);
       if (lit) {
         Oublier.Audio.playChime("tea");
-        Oublier.World.triggerHeartRipple(0, 222);
+        Oublier.World.triggerHeartRipple(0, 56);
         showToast("替远方的旅人点亮了一盏微灯");
       }
       renderBottleReader();
@@ -266,19 +267,19 @@
     });
   }
 
-  /* 3. 观星石阶 · 找回自己 */
+  /* 3. 观星钟楼 · 找回自己 */
   function openCliffModal() {
     const prompts = Oublier.Data.REFLECTION_PROMPTS;
     const prompt = prompts[currentPromptIndex % prompts.length];
 
     openModal(
       "cliff",
-      '<div class="modal-eyebrow">STARGAZING REFLECTION</div>' +
-        '<h2 class="modal-title">观星石阶</h2>' +
+      '<div class="modal-eyebrow">ROSE WINDOW &amp; BELL TOWER</div>' +
+        '<h2 class="modal-title">观星钟楼</h2>' +
         '<div class="quote-card">' +
         '  <p class="quote-text">' + escapeHtml(prompt) + "</p>" +
         "</div>" +
-        '<textarea id="reflection-input" class="textarea-field" maxlength="600" placeholder="不需要工整的答案，想到什么就写给自己听……"></textarea>' +
+        '<textarea id="reflection-input" class="textarea-field" maxlength="600" placeholder="在玫瑰窗下，不需要工整的答案，想到什么就写给自己听……"></textarea>' +
         '<p class="modal-note">仅保存在本地「记忆匣」中，你可以随时导出或清空。</p>' +
         '<div class="modal-actions" style="justify-content: space-between;">' +
         '  <button id="btn-reflection-swap" class="btn-secondary" type="button">换一个问题</button>' +
@@ -305,17 +306,17 @@
       updateHUD();
       closeModal();
       Oublier.Audio.playChime("star");
-      Oublier.World.triggerHeartRipple(0, -178);
-      showToast("这颗思绪已经化作头顶的一颗星光");
+      Oublier.World.triggerHeartRipple(0, -50);
+      showToast("这颗思绪已经化作钟楼上方的一颗星光");
     });
   }
 
-  /* 4. 静谧长椅 · 呼吸引导 */
+  /* 4. 柏林石亭 · 呼吸引导 */
   function openBenchModal() {
     openModal(
       "bench",
-      '<div class="modal-eyebrow">QUIET BREATH</div>' +
-        '<h2 class="modal-title">静谧长椅</h2>' +
+      '<div class="modal-eyebrow">CYPRESS GROVE</div>' +
+        '<h2 class="modal-title">柏林石亭</h2>' +
         '<p class="modal-lead">不用想待办事项，也不用思考人生。先跟着光圈，给身体一分钟。</p>' +
         '<div class="breath-stage">' +
         '  <div id="breath-orb" class="breath-orb"></div>' +
@@ -346,7 +347,7 @@
       startBtn.classList.add("hidden");
       orb.className = "breath-orb inhale";
       label.textContent = "慢慢吸气…（第 " + round + "/3 轮）";
-      sub.textContent = "感受夜风穿过肩膀";
+      sub.textContent = "感受柏树间的海风穿过肩膀";
 
       breathTimers.push(
         setTimeout(function () {
@@ -380,7 +381,73 @@
     });
   }
 
-  /* 5. 偶遇旅人 */
+  /* 5. 回声长廊 · 低语与风钟 */
+  function openCloisterModal() {
+    const whispers = Oublier.Data.CLOISTER_WHISPERS;
+    const whisper = whispers[whisperIndex % whispers.length];
+
+    openModal(
+      "cloister",
+      '<div class="modal-eyebrow">WHISPERING CLOISTER</div>' +
+        '<h2 class="modal-title">回声长廊</h2>' +
+        '<p class="modal-lead">对称的尖拱石柱间留存着过往旅人的轻声低语。如果连打字都觉得累，只管听一听就好。</p>' +
+        '<div class="quote-card">' +
+        '  <p id="cloister-whisper-text" class="quote-text">' + escapeHtml(whisper) + "</p>" +
+        '  <div class="quote-meta"><span>石廊回音</span><span>无需回应</span></div>' +
+        "</div>" +
+        '<div class="modal-actions" style="justify-content: space-between;">' +
+        '  <button id="btn-cloister-next" class="btn-secondary" type="button">再听一句低语</button>' +
+        '  <button id="btn-cloister-bell" class="btn-accent" type="button">敲响风钟</button>' +
+        "</div>"
+    );
+
+    $("btn-cloister-next").addEventListener("click", function () {
+      whisperIndex = (whisperIndex + 1) % whispers.length;
+      const textEl = $("cloister-whisper-text");
+      if (textEl) textEl.textContent = whispers[whisperIndex];
+      Oublier.Audio.playChime("step");
+    });
+
+    $("btn-cloister-bell").addEventListener("click", function () {
+      Oublier.Audio.playChime("bell");
+      Oublier.World.triggerBellWave();
+      showToast("沉缓的钟声荡开石廊，海风好像也跟着慢了下来");
+    });
+  }
+
+  /* 6. 孤灯望海台 · 全景远眺 */
+  function openLighthouseModal() {
+    openModal(
+      "lighthouse",
+      '<div class="modal-eyebrow">CLIFFSIDE LANTERN OVERLOOK</div>' +
+        '<h2 class="modal-title">孤灯望海台</h2>' +
+        '<p class="modal-lead">东南悬崖上的高灯塔守望着整片夜海。站在高处看一眼整座修道院的轮廓，往往会让心里突然开阔。</p>' +
+        '<div class="quote-card">' +
+        '  <p class="quote-text">“当你觉得眼前的事情太大、太挤时，不妨退后几十步，看看大海和尖顶是如何安静共存的。”</p>' +
+        "</div>" +
+        '<div class="modal-actions" style="justify-content: space-between;">' +
+        '  <button id="btn-lighthouse-close" class="btn-secondary" type="button">先留在这里</button>' +
+        '  <button id="btn-lighthouse-overlook" class="btn-accent" type="button">切换全景远眺</button>' +
+        "</div>"
+    );
+
+    $("btn-lighthouse-close").addEventListener("click", closeModal);
+    $("btn-lighthouse-overlook").addEventListener("click", function () {
+      closeModal();
+      setOverlookMode(true);
+      Oublier.Audio.playChime("star");
+      showToast("已切换至望海台全景视角，按 ESC 或底部按钮返回");
+    });
+  }
+
+  function setOverlookMode(enabled) {
+    const active = Oublier.World.toggleOverlookCamera(enabled);
+    if (els.btnExitOverlook) {
+      els.btnExitOverlook.classList.toggle("hidden", !active);
+    }
+  }
+
+  /* 7. 偶遇旅人 */
   function openTravelerModal(traveler) {
     const choicesHtml = traveler.dialogue
       .map(function (d, idx) {
@@ -406,7 +473,7 @@
     $("btn-traveler-tea").addEventListener("click", function () {
       box.textContent = traveler.teaReaction;
       Oublier.Audio.playChime("tea");
-      Oublier.World.triggerHeartRipple(traveler.x, traveler.y);
+      Oublier.World.triggerHeartRipple(traveler.x, traveler.z);
       showToast("你向「" + traveler.name + "」递出了一杯热茶");
     });
 
@@ -427,7 +494,7 @@
     });
   }
 
-  /* 6. 记忆匣 */
+  /* 8. 记忆匣 */
   function openJournalModal(tabName) {
     const tab = tabName || "reflections";
     const state = Oublier.Storage.getState();
@@ -436,7 +503,7 @@
     if (tab === "reflections") {
       if (state.journalEntries.length === 0) {
         listHtml =
-          '<div class="empty-state">记忆匣里还没有自省回声。<br/>去北边的「观星石阶」坐坐，和自己说说话吧。</div>';
+          '<div class="empty-state">记忆匣里还没有自省回声。<br/>去北边的「观星钟楼」玫瑰窗下坐坐，和自己说说话吧。</div>';
       } else {
         listHtml =
           '<div class="journal-list">' +
@@ -456,7 +523,7 @@
     } else {
       if (state.savedBottles.length === 0) {
         listHtml =
-          '<div class="empty-state">还没有收藏的漂流瓶。<br/>去南边「潮汐栈桥」捞一捞远方的声音吧。</div>';
+          '<div class="empty-state">还没有收藏的漂流瓶。<br/>去南边「潮汐石栈桥」捞一捞远方的声音吧。</div>';
       } else {
         listHtml =
           '<div class="journal-list">' +
@@ -515,7 +582,7 @@
     });
   }
 
-  /* 7. 更换临时身份 */
+  /* 9. 更换临时身份 */
   function openIdentityModal() {
     const state = Oublier.Storage.getState();
     openModal(
@@ -545,6 +612,73 @@
       closeModal();
       showToast("今晚你是「" + Oublier.Storage.getState().identity + "」");
     });
+  }
+
+  function renderMinimap() {
+    const mc = els.minimapCanvas;
+    if (!mc || (els.hud && els.hud.classList.contains("hidden"))) return;
+    const mctx = mc.getContext("2d");
+    const size = mc.width;
+    const half = size / 2;
+    const scale = 0.92;
+
+    mctx.clearRect(0, 0, size, size);
+
+    // 岛屿轮廓圆
+    mctx.fillStyle = "rgba(38, 48, 66, 0.55)";
+    mctx.strokeStyle = "rgba(217, 181, 132, 0.25)";
+    mctx.lineWidth = 1;
+    mctx.beginPath();
+    mctx.arc(half, half, 54, 0, Math.PI * 2);
+    mctx.fill();
+    mctx.stroke();
+
+    // 十字石道
+    mctx.strokeStyle = "rgba(195, 208, 232, 0.16)";
+    mctx.lineWidth = 2;
+    mctx.beginPath();
+    mctx.moveTo(half, half - 48);
+    mctx.lineTo(half, half + 54);
+    mctx.moveTo(half - 46, half - 7);
+    mctx.lineTo(half + 46, half - 7);
+    mctx.stroke();
+
+    const data = Oublier.World.getMinimapState();
+
+    // 六处地标微光点
+    data.landmarks.forEach(function (lm) {
+      const mx = half + lm.x * scale;
+      const my = half + lm.z * scale;
+      mctx.fillStyle = lm.id === "campfire" ? "#f5a764" : "#d9b584";
+      mctx.beginPath();
+      mctx.arc(mx, my, lm.id === "campfire" ? 3.5 : 2.6, 0, Math.PI * 2);
+      mctx.fill();
+    });
+
+    // 同行旅人小点
+    data.travelers.forEach(function (t) {
+      const mx = half + t.x * scale;
+      const my = half + t.z * scale;
+      mctx.fillStyle = t.color;
+      mctx.beginPath();
+      mctx.arc(mx, my, 2.2, 0, Math.PI * 2);
+      mctx.fill();
+    });
+
+    // 玩家三角方向标
+    const px = half + data.player.x * scale;
+    const py = half + data.player.z * scale;
+    mctx.save();
+    mctx.translate(px, py);
+    mctx.rotate(-data.player.yaw + Math.PI);
+    mctx.fillStyle = "#ffffff";
+    mctx.beginPath();
+    mctx.moveTo(0, -5);
+    mctx.lineTo(3.6, 3.8);
+    mctx.lineTo(-3.6, 3.8);
+    mctx.closePath();
+    mctx.fill();
+    mctx.restore();
   }
 
   function setZenMode(enabled) {
@@ -588,6 +722,8 @@
       btnJournal: $("btn-journal"),
       btnZenMode: $("btn-zen-mode"),
       btnExitZen: $("btn-exit-zen"),
+      btnExitOverlook: $("btn-exit-overlook"),
+      minimapCanvas: $("minimap-canvas"),
       hintBar: $("hint-bar"),
       hintText: $("hint-text"),
       toastContainer: $("toast-container"),
@@ -625,6 +761,9 @@
     });
     els.btnExitZen.addEventListener("click", function () {
       setZenMode(false);
+    });
+    els.btnExitOverlook.addEventListener("click", function () {
+      setOverlookMode(false);
     });
 
     els.hintBar.addEventListener("click", function () {
@@ -681,6 +820,8 @@
     else if (lm.id === "pier") openPierModal("read");
     else if (lm.id === "cliff") openCliffModal();
     else if (lm.id === "bench") openBenchModal();
+    else if (lm.id === "cloister") openCloisterModal();
+    else if (lm.id === "lighthouse") openLighthouseModal();
   }
 
   Oublier.UI = {
@@ -692,6 +833,9 @@
     closeModal,
     isModalOpen,
     isEntryVisible,
-    setZenMode
+    setZenMode,
+    setOverlookMode,
+    renderMinimap,
+    showToast
   };
 })(window);

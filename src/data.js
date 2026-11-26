@@ -11,9 +11,9 @@
     "晚风收藏家",
     "发呆的蓝鲸",
     "末班地铁的旁观者",
-    "屋顶数云的人",
+    "钟楼下的守夜人",
     "借火的夜行人",
-    "折纸船的旧梦",
+    "回廊里的抄书者",
     "海岸线散步者",
     "不回消息的猫",
     "等潮汐的灯塔",
@@ -23,7 +23,7 @@
     "失眠的松果",
     "没有日程表的星期天",
     "只喝热水的星",
-    "岸边微醺的月影"
+    "修道院外的白鸽"
   ];
 
   const REFLECTION_PROMPTS = [
@@ -43,19 +43,38 @@
     "你上一次没有任何目的、纯粹为了好玩而做一件事，是什么时候？",
     "在所有必须扮演的角色之外，你的内心还保留着哪一小块自留地？",
     "如果今晚可以寄一封不署名的信给半年后的自己，你想叮嘱什么？",
-    "你最害怕别人看到你的哪一面？在忘忧屿，那一面其实也很安全。",
+    "你最害怕别人看到你的哪一面？在忘忧修道院，那一面其实也很安全。",
     "今天哪一刻你其实想说“我不愿意”，却还是习惯性地点了头？"
   ];
 
   const RELEASE_RESPONSES = [
-    "火光轻轻卷走了那些字迹，剩下的交给海风吧。",
-    "它已经化作一缕青烟升向夜空，今晚不必再背着它走路了。",
-    "篝火哔剥响了一声，像是在说：没关系，到这里就先放下吧。",
-    "火星散进星海里，明天醒来时，那件事会变得比今晚轻一点。",
+    "圣火轻轻卷走了那些字迹，剩下的交给海风吧。",
+    "它已经化作一缕余烬升向尖顶之上，今晚不必再背着它走路了。",
+    "铁盆里的木柴轻响了一声，像是在说：没关系，到这里就先放下吧。",
+    "火星穿过石拱门散进星海，明天醒来时，那件事会变得比今晚轻一点。",
     "火苗舔过纸角，所有说不出口的委屈都归于温暖的灰烬。",
     "烧完啦。伸个懒腰，再多烤一会儿火吧。",
     "海风把余温吹散了，此刻的你只属于你自己的呼吸。",
     "不必强迫自己立刻开心起来，至少今晚它不再占着你的口袋了。"
+  ];
+
+  const CLOISTER_WHISPERS = [
+    "石廊上的风已经吹了几百年，你的赶时间在它面前其实可以稍微慢一点。",
+    "不必每件事都做到满分。有些裂缝，本来就是用来让月光照进来的。",
+    "如果今晚大脑还在不停回放白天的对话，试着把那些句子想象成墙外的潮声。",
+    "允许自己有一小段时间对世界“暂时失联”，天不会塌下来。",
+    "你并不是一台必须时刻高效运转的机器，疲惫本来就是身体在替你喊停。",
+    "真正的安宁，往往不是把所有问题解决完才出现，而是先学会在问题旁边坐一会儿。",
+    "在回廊尽头没有人在给你打分，连风钟也只按自己的心情响起。",
+    "那些让你羞愧或懊恼的笨拙瞬间，其实早就随着涨潮被冲散在石阶外了。",
+    "如果不知道下一步要往哪里走，就先站在原地看一会儿玫瑰窗上的月光吧。",
+    "你值得拥有一段没有任何目的、不被任何目标绑架的夜晚。",
+    "把“我应该”换成“我现在想”，哪怕只是想多发五分钟呆。",
+    "许多看似紧迫的事，放到三个月后再回头看，都只是一阵路过的薄雾。",
+    "今天已经很辛苦了。剩下的路，留给睡醒之后更轻盈的自己吧。",
+    "静下来听一听，你心里那个一直没被问候的声音，今天还好吗？",
+    "不需要把所有情绪都整理出意义，难过也可以只是坐在这里吹吹风。",
+    "天亮以后你还是要回到真实世界，但至少此刻，整座修道院都替你守着门。"
   ];
 
   const SEED_BOTTLES = [
@@ -162,21 +181,23 @@
       id: "tea-keeper",
       name: "凌晨的煮茶人",
       role: "守火者",
-      color: "#f2b880",
-      home: { x: -72, y: 36 },
-      patrolRadius: 34,
-      status: "正往小泥炉里添一块松木",
-      greeting: "“别拘束。这壶陈皮白茶刚煮好，岛上没有闹钟，你只管坐着发呆。”",
+      color: "#c88456",
+      scarfColor: "#e6b588",
+      hasLantern: true,
+      home: { x: -10, z: 8 },
+      patrolRadius: 6,
+      status: "正站在石拱门旁守着暖炉",
+      greeting: "“别拘束。这壶陈皮白茶刚煮好，修道院里没有闹钟，你只管坐着发呆。”",
       teaReaction: "他默默往你手里塞了一只温热的粗陶杯，茶香混着松烟味散开，你们谁都没有再开口。",
-      silentReaction: "你和煮茶人并肩望着跳动的火舌。火光把影子拉得很长，世界好像只剩下木柴轻轻炸开的声响。",
+      silentReaction: "你和煮茶人并肩望着圣火坛里跳动的火舌。石柱把影子拉得很长，世界好像只剩下木柴轻响。",
       dialogue: [
         {
-          choice: "“你为什么也会来这座岛？”",
+          choice: "“你为什么也会来这里？”",
           reply: "“白天在现实里听了太多‘收到’‘好的’‘马上改’。到了晚上，就想找个没人认识我的地方，听听水壶烧开的声音。”"
         },
         {
           choice: "“今天过得有点累，不想说话。”",
-          reply: "“那就别说。把不想记住的丢进火里，剩下的交给海风。天亮以后，连我也不会记得你来过。”"
+          reply: "“那就别说。把不想记住的丢进圣火里，剩下的交给海风。天亮以后，连我也不会记得你来过。”"
         },
         {
           choice: "“这杯茶喝完，我好像又有一点力气了。”",
@@ -188,13 +209,15 @@
       id: "tide-listener",
       name: "听海的影子",
       role: "拾瓶者",
-      color: "#8cc4e8",
-      home: { x: -135, y: 120 },
-      patrolRadius: 52,
-      status: "沿着潮湿的沙岸慢慢走着",
+      color: "#6b99c2",
+      scarfColor: "#a8d0f0",
+      hasLantern: false,
+      home: { x: -11, z: 41 },
+      patrolRadius: 8,
+      status: "沿着南面的水门石阶慢慢走着",
       greeting: "“嘘——你听，第三道浪退下去的时候，声音会比前两道轻一点。”",
       teaReaction: "他接过热茶轻抿了一口，朝你微微点头：“海风有点凉，谢谢你的暖意。”",
-      silentReaction: "你们隔着两步的距离站在岸边，一起看着浪花把月光揉碎又拼好。孤独感忽然变得很温柔。",
+      silentReaction: "你们隔着两步的距离站在水门旁，一起看着黑曜石般的海面把月光揉碎又拼好。",
       dialogue: [
         {
           choice: "“平时在岸上，大家好像都很忙。”",
@@ -206,7 +229,7 @@
         },
         {
           choice: "“我好像快记不起自己真正的样子了。”",
-          reply: "“没关系，去北边的观星石阶坐一坐吧。不用急着找回全部，先找回一个小小的念头就够了。”"
+          reply: "“没关系，去北边的观星钟楼坐一坐吧。不用急着找回全部，先找回一个小小的念头就够了。”"
         }
       ]
     },
@@ -214,13 +237,15 @@
       id: "star-gazer",
       name: "不看表的观星客",
       role: "守夜人",
-      color: "#c5b5f2",
-      home: { x: 108, y: -115 },
-      patrolRadius: 48,
-      status: "仰头辨认松林上方的星图",
-      greeting: "“夜晚最公平的地方在于，无论你白天搞砸了什么，头顶的星光都不会少一颗。”",
+      color: "#9a87cf",
+      scarfColor: "#d3c6f8",
+      hasLantern: true,
+      home: { x: 13, z: -38 },
+      patrolRadius: 7,
+      status: "仰头凝望钟楼玫瑰窗上方的星图",
+      greeting: "“夜晚最公平的地方在于，无论你白天搞砸了什么，尖顶之上的星光都不会少一颗。”",
       teaReaction: "他把热茶捧在掌心暖手，轻声道：“这比城市里的自动贩卖机温暖多了。”",
-      silentReaction: "你们一起仰面望着缓缓流动的星河。偶尔一颗流星划过，谁也没有急着许愿。",
+      silentReaction: "你们一起仰面望着玫瑰窗后的夜空。偶尔一颗流星划过石塔，谁也没有急着许愿。",
       dialogue: [
         {
           choice: "“看着星星，总觉得自己的烦恼又小又好笑。”",
@@ -232,7 +257,35 @@
         },
         {
           choice: "“祝你今晚也拥有好梦。”",
-          reply: "“谢谢你。无论什么时候觉得太吵了，这座岛都在这里，火也一直给你留着。”"
+          reply: "“谢谢你。无论什么时候觉得太吵了，这座修道院都在这里，火也一直给你留着。”"
+        }
+      ]
+    },
+    {
+      id: "scribe",
+      name: "修道院抄书人",
+      role: "听风者",
+      color: "#7ca696",
+      scarfColor: "#b8decb",
+      hasLantern: false,
+      home: { x: -36, z: -12 },
+      patrolRadius: 6,
+      status: "在西侧回声长廊的拱柱间慢慢踱步",
+      greeting: "“以前我总想把每一页羊皮纸都抄得毫无涂改。后来风吹翻了书页，我才发现留白才是最舒服的部分。”",
+      teaReaction: "他接过茶杯轻轻晃了晃：“在回廊里吹风久了，能喝到一口热茶真好。”",
+      silentReaction: "你们站在对称的石拱阴影下，听着风铃发出极其轻微的一声嗡鸣，心里忽然静了下来。",
+      dialogue: [
+        {
+          choice: "“我也总是害怕把事情做砸。”",
+          reply: "“其实很多时候，‘做完’就已经够了，甚至‘今天先不做’也是一种回答。石柱缺了一角，不也照样站了几百年吗？”"
+        },
+        {
+          choice: "“回廊里的风声听起来像有人在说话。”",
+          reply: "“那是过去来过这里的旅人留下的善意。如果你心里很乱，可以去长廊尽头敲一下风钟。”"
+        },
+        {
+          choice: "“谢谢你陪我站了一会儿。”",
+          reply: "“不客气。就算什么都不做、只是散步，也完全算作好好度过了一个夜晚。”"
         }
       ]
     }
@@ -241,35 +294,51 @@
   const LANDMARKS = [
     {
       id: "campfire",
-      name: "遗忘篝火",
-      shortHint: "把想暂时忘掉的事丢进火里",
+      name: "遗忘圣火坛",
+      shortHint: "把想暂时忘掉的事投入圣火",
       x: 0,
-      y: 12,
-      radius: 68
-    },
-    {
-      id: "pier",
-      name: "潮汐栈桥",
-      shortHint: "打捞漂流瓶，或寄出你的只言片语",
-      x: 0,
-      y: 222,
-      radius: 72
+      z: 0,
+      radius: 7.5
     },
     {
       id: "cliff",
-      name: "观星石阶",
-      shortHint: "回答一个温柔的问题，找回自己",
+      name: "观星钟楼",
+      shortHint: "登上北阶，在玫瑰窗下找回自己",
       x: 0,
-      y: -178,
-      radius: 68
+      z: -50,
+      radius: 8.5
+    },
+    {
+      id: "pier",
+      name: "潮汐石栈桥",
+      shortHint: "穿过水门，打捞或投出漂流瓶",
+      x: 0,
+      z: 56,
+      radius: 8.0
     },
     {
       id: "bench",
-      name: "静谧长椅",
-      shortHint: "坐下来，跟随呼吸慢一分钟",
-      x: 185,
-      y: -26,
-      radius: 64
+      name: "柏林石亭",
+      shortHint: "在东林石椅静坐，跟随呼吸慢下来",
+      x: 46,
+      z: -8,
+      radius: 7.5
+    },
+    {
+      id: "cloister",
+      name: "回声长廊",
+      shortHint: "听一句长廊低语，或敲响石廊风钟",
+      x: -46,
+      z: -8,
+      radius: 8.5
+    },
+    {
+      id: "lighthouse",
+      name: "孤灯望海台",
+      shortHint: "登上东南悬崖，全景远眺整片夜海",
+      x: 38,
+      z: 36,
+      radius: 8.0
     }
   ];
 
@@ -277,56 +346,65 @@
     midnight: {
       id: "midnight",
       label: "星夜",
-      skyTop: "#060b16",
-      skyBottom: "#0e1a30",
-      seaOuter: "#081224",
-      seaInner: "#132948",
-      foam: "rgba(182, 214, 248, 0.22)",
-      sand: "#2b303f",
-      turfOuter: "#172638",
-      turfInner: "#21364c",
-      treeDark: "#0e1b2c",
-      treeLight: "#16293f",
+      skyTop: 0x060a14,
+      skyHorizon: 0x162238,
+      fogColor: 0x101828,
+      fogDensity: 0.0085,
+      moonColor: 0xdce8ff,
+      moonIntensity: 1.05,
+      hemiSky: 0x5c7aa6,
+      hemiGround: 0x181c28,
+      hemiIntensity: 0.72,
+      seaColor: 0x091322,
+      stoneTint: 0x576073,
+      darkStoneTint: 0x313746,
+      turfTint: 0x131b26,
       starAlpha: 0.95,
       rainIntensity: 0,
       fireflyAlpha: 0.85,
-      fogColor: "rgba(18, 32, 58, 0.22)"
+      roseGlow: 0x9ab8ff
     },
     rainy: {
       id: "rainy",
       label: "细雨",
-      skyTop: "#09131a",
-      skyBottom: "#142632",
-      seaOuter: "#0a1720",
-      seaInner: "#193342",
-      foam: "rgba(176, 218, 232, 0.24)",
-      sand: "#29333a",
-      turfOuter: "#172b33",
-      turfInner: "#203b44",
-      treeDark: "#0d1c22",
-      treeLight: "#162d36",
-      starAlpha: 0.22,
+      skyTop: 0x081018,
+      skyHorizon: 0x1c2d38,
+      fogColor: 0x15222b,
+      fogDensity: 0.013,
+      moonColor: 0xaac8d8,
+      moonIntensity: 0.72,
+      hemiSky: 0x628394,
+      hemiGround: 0x162026,
+      hemiIntensity: 0.68,
+      seaColor: 0x0a1720,
+      stoneTint: 0x485560,
+      darkStoneTint: 0x2c363e,
+      turfTint: 0x17262b,
+      starAlpha: 0.25,
       rainIntensity: 1,
       fireflyAlpha: 0.35,
-      fogColor: "rgba(130, 175, 195, 0.14)"
+      roseGlow: 0x7cb8cc
     },
     dawn: {
       id: "dawn",
       label: "拂晓",
-      skyTop: "#1a172c",
-      skyBottom: "#422c46",
-      seaOuter: "#18192e",
-      seaInner: "#373052",
-      foam: "rgba(246, 206, 188, 0.28)",
-      sand: "#423743",
-      turfOuter: "#26283e",
-      turfInner: "#353652",
-      treeDark: "#191a2d",
-      treeLight: "#272742",
+      skyTop: 0x181529,
+      skyHorizon: 0x543a54,
+      fogColor: 0x33263b,
+      fogDensity: 0.008,
+      moonColor: 0xf6cbb2,
+      moonIntensity: 1.15,
+      hemiSky: 0xb689a8,
+      hemiGround: 0x2a2232,
+      hemiIntensity: 0.85,
+      seaColor: 0x17182d,
+      stoneTint: 0x655c6c,
+      darkStoneTint: 0x403948,
+      turfTint: 0x272538,
       starAlpha: 0.45,
       rainIntensity: 0,
       fireflyAlpha: 0.6,
-      fogColor: "rgba(244, 178, 148, 0.16)"
+      roseGlow: 0xf4b69c
     }
   };
 
@@ -334,6 +412,7 @@
     IDENTITY_POOL,
     REFLECTION_PROMPTS,
     RELEASE_RESPONSES,
+    CLOISTER_WHISPERS,
     SEED_BOTTLES,
     TRAVELERS,
     LANDMARKS,

@@ -272,6 +272,12 @@
     } else if (type === "tea") {
       playNote(PENTATONIC[1], 0, 1.4, 0.18);
       playNote(PENTATONIC[4], 0.16, 1.7, 0.18);
+    } else if (type === "bell") {
+      // 深沉悠远的修道院风钟（基音 + 小三度 + 五度 + 高八度泛音）
+      playNote(196.0, 0, 3.8, 0.24);
+      playNote(233.08, 0.02, 3.2, 0.12);
+      playNote(293.66, 0.03, 2.9, 0.14);
+      playNote(392.0, 0.04, 2.4, 0.1);
     } else {
       const f = PENTATONIC[Math.floor(Math.random() * PENTATONIC.length)];
       playNote(f, 0, 1.2, 0.14);

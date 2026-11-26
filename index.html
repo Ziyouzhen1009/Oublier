@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Oublier · 在这里逃离真实的世界</title>
+  <link rel="stylesheet" href="styles/main.css" />
+  <script defer src="src/data.js"></script>
+  <script defer src="src/storage.js"></script>
+  <script defer src="src/audio.js"></script>
+  <script defer src="src/world.js"></script>
+  <script defer src="src/ui.js"></script>
+  <script defer src="src/app.js"></script>
+</head>
+<body class="mood-midnight">
+  <!-- 全屏岛屿世界画布 -->
+  <canvas id="world-canvas" aria-label="Oublier 忘忧屿世界"></canvas>
+
+  <!-- 登岛前帷幕 -->
+  <div id="entry-veil" class="entry-veil" role="dialog" aria-modal="true" aria-labelledby="entry-title">
+    <div class="entry-card">
+      <div class="entry-eyebrow">ISLE OF FORGETTING · 忘忧屿</div>
+      <h1 id="entry-title" class="entry-title">Oublier</h1>
+      <p class="entry-subtitle">在这里逃离真实的世界。</p>
+      <p class="entry-desc">
+        不必带着现实里的头衔与待办清单。<br />
+        此刻你是谁都可以——只是吹吹海风、烤烤火，或静静待一会儿。
+      </p>
+
+      <div class="identity-box">
+        <label for="entry-identity-input" class="identity-label">今晚的临时身份</label>
+        <div class="identity-row">
+          <input
+            id="entry-identity-input"
+            type="text"
+            maxlength="20"
+            placeholder="给自己一个轻盈的代号"
+            autocomplete="off"
+          />
+          <button id="btn-random-identity" class="btn-ghost" type="button" title="换一个身份">
+            换一个
+          </button>
+        </div>
+      </div>
+
+      <button id="btn-enter-island" class="btn-primary" type="button">
+        <span>登岛</span>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 12h14"></path>
+          <path d="m13 6 6 6-6 6"></path>
+        </svg>
+      </button>
+
+      <div class="entry-footnote">所有心事仅保存在你的本地设备中，随时可以彻底遗忘</div>
+    </div>
+  </div>
+
+  <!-- 浮动界面层 (HUD) -->
+  <div id="hud" class="hud hidden">
+    <!-- 左上：品牌与当前临时身份 -->
+    <header class="hud-top-left">
+      <div class="brand-pill glass-pill">
+        <span class="brand-dot" aria-hidden="true"></span>
+        <span class="brand-name">Oublier</span>
+        <span class="brand-sep">·</span>
+        <button id="btn-edit-identity" class="identity-trigger" type="button" title="更换今晚的临时身份">
+          <span id="hud-identity-text">3号车厢的听雨人</span>
+        </button>
+      </div>
+      <div class="stats-pill glass-pill" title="已释怀的心事 · 记忆星光">
+        <span class="stat-item">释怀 <strong id="stat-released">0</strong></span>
+        <span class="stat-sep">·</span>
+        <span class="stat-item">星光 <strong id="stat-stars">0</strong></span>
+      </div>
+    </header>
+
+    <!-- 右上：天色、声音、记忆匣、发呆模式 -->
+    <nav class="hud-top-right" aria-label="空间控制">
+      <div class="mood-switcher glass-pill" role="group" aria-label="心境天色">
+        <button class="mood-btn active" data-mood="midnight" type="button">星夜</button>
+        <button class="mood-btn" data-mood="rainy" type="button">细雨</button>
+        <button class="mood-btn" data-mood="dawn" type="button">拂晓</button>
+      </div>
+
+      <button id="btn-sound-toggle" class="icon-pill glass-pill" type="button" aria-expanded="false" aria-controls="sound-panel" title="环境声景">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+        </svg>
+        <span class="btn-label">声音</span>
+      </button>
+
+      <button id="btn-journal" class="icon-pill glass-pill" type="button" title="打开记忆匣">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path>
+        </svg>
+        <span class="btn-label">记忆匣</span>
+      </button>
+
+      <button id="btn-zen-mode" class="icon-pill glass-pill" type="button" title="隐藏界面，纯粹发呆">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+        <span class="btn-label">发呆</span>
+      </button>
+    </nav>
+
+    <!-- 声音混音浮层 -->
+    <aside id="sound-panel" class="sound-panel glass-panel hidden" aria-label="环境声景调节">
+      <div class="sound-panel-header">
+        <span>岛屿声景</span>
+        <button id="btn-audio-master" class="btn-tag" type="button">已开启</button>
+      </div>
+      <div class="sound-sliders">
+        <label class="slider-row">
+          <span>海浪</span>
+          <input id="vol-ocean" type="range" min="0" max="100" value="45" />
+        </label>
+        <label class="slider-row">
+          <span>细雨</span>
+          <input id="vol-rain" type="range" min="0" max="100" value="15" />
+        </label>
+        <label class="slider-row">
+          <span>篝火</span>
+          <input id="vol-fire" type="range" min="0" max="100" value="35" />
+        </label>
+        <label class="slider-row">
+          <span>星铃</span>
+          <input id="vol-chimes" type="range" min="0" max="100" value="60" />
+        </label>
+      </div>
+      <p class="sound-note">由浏览器实时合成，无需加载外部音频</p>
+    </aside>
+
+    <!-- 底部上下文交互提示 -->
+    <div id="hint-bar" class="hint-bar glass-pill">
+      <span id="hint-text">WASD / 方向键漫步，或点击岛上任意位置 · 靠近发光处按 E 交互</span>
+    </div>
+  </div>
+
+  <!-- 发呆模式退出按钮 -->
+  <button id="btn-exit-zen" class="zen-exit glass-pill hidden" type="button">
+    回到界面
+  </button>
+
+  <!-- 轻柔消息提示 -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- 通用玻璃拟态弹窗 -->
+  <div id="modal-backdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div id="modal-dialog" class="modal-dialog glass-panel">
+      <button id="btn-modal-close" class="modal-close" type="button" aria-label="关闭窗口">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6 6 18"></path>
+          <path d="m6 6 12 12"></path>
+        </svg>
+      </button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+</body>
+</html>

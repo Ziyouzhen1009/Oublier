@@ -61,10 +61,10 @@
     if (target) {
       const label = target.item.name;
       const sub = target.kind === "landmark" ? target.item.shortHint : target.item.status;
-      els.hintText.textContent = "按 E 或点击 · " + label + "（" + sub + "）";
+      els.hintText.textContent = "已走近 · 左键点击「" + label + "」交互（" + sub + "）";
       els.hintBar.classList.add("interactive");
     } else {
-      els.hintText.textContent = "WASD / 方向键漫步 · 拖拽旋转视角 · 点击地标或按 E 交互";
+      els.hintText.textContent = "左键点击或按住地面漫步 · 滚轮缩放视角 · 走近地标后左键点击交互";
       els.hintBar.classList.remove("interactive");
     }
   }

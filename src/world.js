@@ -18,41 +18,31 @@
   let extraStarsCount = 0;
   let overlookActive = false;
 
-  // 相机状态（第三人称跟随 + 拖拽旋转）
+  // 类《英雄联盟》高俯视固定朝向跟随相机（支持滚轮平滑缩放）
   const camState = {
-    yaw: 0.15,
-    pitch: 0.44,
-    dist: 17.5,
-    targetYaw: 0.15,
-    targetPitch: 0.44,
-    targetDist: 17.5,
-    lookAt: new THREE.Vector3(0, 1.8, 0)
+    yaw: 0.06,
+    pitch: 0.96,
+    dist: 27.5,
+    targetDist: 27.5,
+    lookAt: new THREE.Vector3(0, 1.0, 10.5)
   };
 
   // 玩家状态（初始在圣火坛南侧石路上，面向北方的玫瑰窗与圣火坛）
   const player = {
     x: 0,
-    y: 0,
+    y: 0.06,
     z: 10.5,
     vx: 0,
     vz: 0,
     yaw: Math.PI,
     speed: 10.5,
     target: null,
-    pendingAction: null,
     rig: null,
     lanternLight: null
   };
 
-  const keys = Object.create(null);
-  let pointerState = {
-    down: false,
-    startX: 0,
-    startY: 0,
-    lastX: 0,
-    lastY: 0,
-    dragged: false
-  };
+  let leftHoldMoving = false;
+  let hoveredTarget = null;
 
   let nearbyTarget = null;
   let callbacks = {
@@ -77,12 +67,19 @@
   let seaMesh = null;
   let seaBaseY = null;
   let clickRingMesh = null;
+  let clickRingInnerMesh = null;
   let clickRingAlpha = 0;
 
+  // 材质引用（支持根据心境天色调整湿度/色调）
   let stoneMat = null;
   let darkStoneMat = null;
   let roofMat = null;
   let turfMat = null;
+  let courtyardMat = null;
+  let roadStoneMat = null;
+  let cloisterFloorMat = null;
+  let northPlazaMat = null;
+  let woodDeckMat = null;
   let glassMat = null;
   let ironMat = null;
   let woodMat = null;
@@ -96,9 +93,11 @@
   let resonanceBellPivot = null;
   let bellSwingAmp = 0;
 
-  const cypressTrees = [];
+  const swayTrees = [];
   const travelers = [];
   const hitTargets = [];
+  const walkableMeshes = [];
+  const landmarkRings = [];
   const fireflyList = [];
   const rainSystem = { points: null, positions: null, count: 550 };
   const embers = [];
@@ -108,6 +107,15 @@
 
   const raycaster = new THREE.Raycaster();
   const pointerNDC = new THREE.Vector2();
+
+  // 北向石阶精确几何参数（构建与 getSurfaceHeight 共用）
+  const NORTH_STAIRS = {
+    zStart: -21.0,
+    zEnd: -34.0,
+    halfWidth: 4.6,
+    count: 12,
+    topHeight: 3.2
+  };
 
   function smoothstep(edge0, edge1, x) {
     const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
@@ -124,30 +132,34 @@
   }
 
   /**
-   * 扩大版哥特岛屿地形高度函数
+   * 岛屿自然地形基础高度（不含铺装厚度）
    */
   function getGroundHeight(x, z) {
     const r = Math.hypot(x, z);
     const angle = Math.atan2(z, x);
     const outerR = islandOuterRadius(angle);
 
-    // 南部石栈桥走廊
     if (Math.abs(x) <= 3.6 && z >= 40 && z <= 61) {
-      return 0.25;
+      return 0.12;
     }
 
-    // 海岸边缘外沉入海床
     if (r > outerR) {
-      return Math.max(-2.6, -0.35 - (r - outerR) * 0.22);
+      return Math.max(-3.2, -0.95 - (r - outerR) * 0.48);
     }
 
     let h = 0;
 
-    // 北方观星钟楼台地 (y = 3.2) & 石阶斜坡
+    // 北方观星钟楼台地 (y = 3.2) & 坡面
     if (z < -21 && Math.abs(x) < 23) {
       const rise = smoothstep(-21, -34, z);
       const sideFade = 1 - smoothstep(14, 23, Math.abs(x));
       h = Math.max(h, 3.2 * rise * sideFade);
+    }
+
+    // 石阶正下方地形略微下沉，避免任何一级台阶之间露草
+    if (Math.abs(x) <= NORTH_STAIRS.halfWidth + 0.4 && z <= -20.5 && z >= -34.5) {
+      const stairT = Math.max(0, Math.min(1, (-21.0 - z) / 13.0));
+      h = Math.min(h, stairT * NORTH_STAIRS.topHeight - 0.35);
     }
 
     // 西方回声长廊台地 (y = 0.85)
@@ -167,20 +179,98 @@
     // 东南孤灯望海台 (y = 1.85)
     const dLight = Math.hypot(x - 38, z - 36);
     if (dLight < 16) {
-      h = Math.max(h, 1.85 * (1 - smoothstep(8, 16, dLight)));
+      h = Math.max(h, 1.85 * (1 - smoothstep(7.5, 16, dLight)));
     }
 
-    // 海岸边缘微落差
     const shoreDrop = smoothstep(outerR - 6, outerR, r) * 0.55;
     return h - shoreDrop;
+  }
+
+  /**
+   * 精确行走表面高度（与铺装石板/石阶/木栈桥顶面 100% 对齐，杜绝脚部穿模/悬浮）
+   */
+  function getSurfaceHeight(x, z) {
+    // 1. 南方木栈桥桥面（顶面 y = 0.28）
+    if (Math.abs(x) <= 2.8 && z >= 42.5 && z <= 61.2) {
+      return 0.28;
+    }
+
+    // 2. 北方 12 级哥特石阶
+    if (
+      Math.abs(x) <= NORTH_STAIRS.halfWidth &&
+      z <= NORTH_STAIRS.zStart &&
+      z >= NORTH_STAIRS.zEnd
+    ) {
+      const stepDepth = (NORTH_STAIRS.zStart - NORTH_STAIRS.zEnd) / NORTH_STAIRS.count;
+      const idx = Math.min(
+        NORTH_STAIRS.count - 1,
+        Math.max(0, Math.floor((NORTH_STAIRS.zStart - z) / stepDepth))
+      );
+      return ((idx + 1) / NORTH_STAIRS.count) * NORTH_STAIRS.topHeight;
+    }
+
+    // 3. 北方观星钟楼石板平台（顶面 y = 3.22）
+    if (Math.abs(x) <= 12.0 && z <= -34.0 && z >= -56.0) {
+      return 3.22;
+    }
+
+    // 4. 西方回声长廊棋盘砖地面（顶面 y = 0.90）
+    if (x >= -57.0 && x <= -31.0 && Math.abs(z + 8) <= 5.5) {
+      return 0.9;
+    }
+
+    // 5. 东方柏林石亭八角石台（顶面 y = 0.90）
+    if (Math.hypot(x - 46, z + 8) <= 6.5) {
+      return 0.9;
+    }
+
+    // 6. 东南孤灯望海台石台（顶面 y = 1.92）
+    if (Math.hypot(x - 38, z - 36) <= 7.2) {
+      return 1.92;
+    }
+
+    // 7. 中央八角镶金花砖庭院（顶面 y = 0.08）
+    if (Math.hypot(x, z) <= 16.8) {
+      return 0.08;
+    }
+
+    // 8. 南北 / 东西主石板大道（顶面 y = 0.06）
+    if (Math.abs(x) <= 2.6 && z >= -21.0 && z <= 42.6) {
+      return 0.06;
+    }
+    if (Math.abs(z + 8) <= 2.3 && Math.abs(x) <= 31.2) {
+      return Math.max(0.06, getGroundHeight(x, z) + 0.05);
+    }
+
+    // 9. 通往东南望海台的贴地斜石径
+    const alongSE = (x - 10) * 0.7071 + (z - 8) * 0.7071;
+    const perpSE = Math.abs(-(x - 10) * 0.7071 + (z - 8) * 0.7071);
+    if (alongSE >= 0 && alongSE <= 32.5 && perpSE <= 1.95) {
+      return getGroundHeight(x, z) + 0.05;
+    }
+
+    // 10. 其余草苔自然地形
+    return getGroundHeight(x, z);
+  }
+
+  /**
+   * 表面法线估算（用于脚底接触阴影贴合斜坡倾角）
+   */
+  function getSurfaceNormal(x, z) {
+    const eps = 0.35;
+    const hL = getSurfaceHeight(x - eps, z);
+    const hR = getSurfaceHeight(x + eps, z);
+    const hD = getSurfaceHeight(x, z - eps);
+    const hU = getSurfaceHeight(x, z + eps);
+    const n = new THREE.Vector3(hL - hR, 2 * eps, hD - hU);
+    return n.normalize();
   }
 
   function clampWalkable(x, z) {
     let nx = x;
     let nz = z;
 
-    // 南部石栈桥走廊允许通行至 z = 60
-    const onPier = Math.abs(nx) <= 2.6 && nz >= 39 && nz <= 60.5;
+    const onPier = Math.abs(nx) <= 2.5 && nz >= 39 && nz <= 60.2;
     if (!onPier) {
       const angle = Math.atan2(nz, nx);
       const maxR = islandOuterRadius(angle) - 3.2;
@@ -191,12 +281,12 @@
       }
     }
 
-    // 避让中央圣火坛石座 (r = 3.9)
+    // 避让中央圣火坛石座 (r = 3.95)
     const dFire = Math.hypot(nx, nz);
-    if (dFire < 3.9) {
-      const push = dFire > 0.01 ? 3.9 / dFire : 1;
+    if (dFire < 3.95) {
+      const push = dFire > 0.01 ? 3.95 / dFire : 1;
       nx = dFire > 0.01 ? nx * push : 0;
-      nz = dFire > 0.01 ? nz * push : 3.9;
+      nz = dFire > 0.01 ? nz * push : 3.95;
     }
 
     // 避让北方钟楼主体墙基
@@ -216,7 +306,6 @@
   }
 
   function buildSkyAndOcean() {
-    // 梯度天空穹顶
     const skyGeo = new THREE.SphereGeometry(230, 32, 20);
     const count = skyGeo.attributes.position.count;
     const colors = new Float32Array(count * 3);
@@ -229,7 +318,6 @@
     skyDome = new THREE.Mesh(skyGeo, skyMat);
     scene.add(skyDome);
 
-    // 月亮圆盘 + 光晕
     moonMesh = new THREE.Mesh(
       new THREE.SphereGeometry(6.5, 20, 20),
       new THREE.MeshBasicMaterial({ color: 0xe6efff, fog: false })
@@ -251,7 +339,6 @@
     moonHalo.scale.set(36, 36, 1);
     moonMesh.add(moonHalo);
 
-    // 3D 星空粒子
     const maxStars = 420;
     const starPos = new Float32Array(maxStars * 3);
     for (let i = 0; i < maxStars; i++) {
@@ -276,7 +363,6 @@
     starPoints = new THREE.Points(starGeo, starMat);
     scene.add(starPoints);
 
-    // 3D 海面
     const seaGeo = new THREE.PlaneGeometry(380, 380, 56, 56);
     seaGeo.rotateX(-Math.PI / 2);
     const posAttr = seaGeo.attributes.position;
@@ -285,7 +371,7 @@
       seaBaseY[i] = posAttr.getY(i);
     }
     const seaMat = new THREE.MeshStandardMaterial({
-      color: 0x091322,
+      color: 0x0b1729,
       roughness: 0.25,
       metalness: 0.55,
       flatShading: true
@@ -296,99 +382,246 @@
     scene.add(seaMesh);
   }
 
+  /**
+   * 为主岛草苔地形生成丰富区域生态顶点色（东侧暖金草甸、西侧蓝绿苔原、北侧紫灰高地、东南鸢尾坡地、岸边鹅卵石湿沙）
+   */
+  function computeTerrainVertexColor(vx, vz) {
+    const baseMoss = new THREE.Color(0x4c6852); // 祖母绿苔草基底
+    const eastMeadow = new THREE.Color(0x7c7448); // 东侧金秋暖草与腐殖土
+    const westHeath = new THREE.Color(0x445e64); // 西侧幽静蓝绿石楠
+    const northSlate = new THREE.Color(0x5a5870); // 北侧高地紫灰砾石草坡
+    const cliffIris = new THREE.Color(0x5c527a); // 东南悬崖薰衣草坡地
+    const shoreSand = new THREE.Color(0x46484e); // 海岸潮湿鹅卵石沙砾
+
+    const col = baseMoss.clone();
+
+    // 东侧秘境花园（银杏暖调）
+    const eastWeight = smoothstep(14, 42, vx) * (1 - smoothstep(14, 34, Math.abs(vz + 8)));
+    col.lerp(eastMeadow, eastWeight * 0.68);
+
+    // 西侧回廊外苔原
+    const westWeight = smoothstep(-14, -42, vx);
+    col.lerp(westHeath, westWeight * 0.62);
+
+    // 北侧钟楼高地
+    const northWeight = smoothstep(-16, -42, vz);
+    col.lerp(northSlate, northWeight * 0.65);
+
+    // 东南悬崖花坡
+    const dLight = Math.hypot(vx - 38, vz - 36);
+    const cliffWeight = 1 - smoothstep(6, 22, dLight);
+    col.lerp(cliffIris, cliffWeight * 0.65);
+
+    // 海岸带渐变
+    const angle = Math.atan2(vz, vx);
+    const outerR = islandOuterRadius(angle);
+    const r = Math.hypot(vx, vz);
+    const shoreWeight = smoothstep(outerR - 7.5, outerR - 0.5, r);
+    col.lerp(shoreSand, shoreWeight * 0.88);
+
+    // 轻微自然有机斑驳起伏
+    const n = Math.sin(vx * 0.17 + vz * 0.13) * Math.cos(vx * 0.09 - vz * 0.21);
+    col.offsetHSL(0, 0, n * 0.035);
+    return col;
+  }
+
+  /**
+   * 构造贴合斜坡地形的东南石板斜径网格
+   */
+  function createSlopedSERoadMesh(mat) {
+    const lengthSegs = 28;
+    const widthSegs = 2;
+    const halfW = 1.95;
+    const startX = 10.0;
+    const startZ = 8.0;
+    const dirX = 0.70710678;
+    const dirZ = 0.70710678;
+    const perpX = -dirZ;
+    const perpZ = dirX;
+    const totalLen = 32.5;
+
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+
+    for (let i = 0; i <= lengthSegs; i++) {
+      const s = (i / lengthSegs) * totalLen;
+      for (let j = 0; j <= widthSegs; j++) {
+        const w = ((j / widthSegs) * 2 - 1) * halfW;
+        const px = startX + dirX * s + perpX * w;
+        const pz = startZ + dirZ * s + perpZ * w;
+        const py = getGroundHeight(px, pz) + 0.05;
+        positions.push(px, py, pz);
+        uvs.push(j / widthSegs, (i / lengthSegs) * 7.0);
+      }
+    }
+
+    const rowStride = widthSegs + 1;
+    for (let i = 0; i < lengthSegs; i++) {
+      for (let j = 0; j < widthSegs; j++) {
+        const a = i * rowStride + j;
+        const b = a + 1;
+        const c = a + rowStride;
+        const d = c + 1;
+        indices.push(a, c, b, b, c, d);
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
   function buildTerrainAndRoads() {
-    // 主岛屿曲面地形
-    const geo = new THREE.PlaneGeometry(144, 144, 72, 72);
+    // 1. 高细分多彩草苔主岛地面
+    const geo = new THREE.PlaneGeometry(148, 148, 128, 128);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position;
+    const vColors = new Float32Array(pos.count * 3);
     for (let i = 0; i < pos.count; i++) {
       const vx = pos.getX(i);
       const vz = pos.getZ(i);
       pos.setY(i, getGroundHeight(vx, vz));
+      const c = computeTerrainVertexColor(vx, vz);
+      vColors[i * 3] = c.r;
+      vColors[i * 3 + 1] = c.g;
+      vColors[i * 3 + 2] = c.b;
     }
+    geo.setAttribute("color", new THREE.BufferAttribute(vColors, 3));
     geo.computeVertexNormals();
 
     const ground = new THREE.Mesh(geo, turfMat);
     ground.receiveShadow = true;
     scene.add(ground);
+    walkableMeshes.push(ground);
 
-    // 中央八角石砖庭院
+    // 2. 中央八角镶金花砖庭院（顶面精确位于 y = 0.08）
     const courtyard = new THREE.Mesh(
-      new THREE.CylinderGeometry(16.8, 17.4, 0.22, 8),
-      stoneMat
+      new THREE.CylinderGeometry(16.8, 17.4, 0.24, 8),
+      courtyardMat
     );
-    courtyard.position.y = -0.02;
+    courtyard.position.y = -0.04;
     courtyard.receiveShadow = true;
     scene.add(courtyard);
+    walkableMeshes.push(courtyard);
 
-    const innerRing = new THREE.Mesh(
-      new THREE.RingGeometry(8.6, 9.2, 8),
-      darkStoneMat
-    );
+    const brassTrimMat = new THREE.MeshStandardMaterial({
+      color: 0xc9a060,
+      roughness: 0.42,
+      metalness: 0.7
+    });
+    const innerRing = new THREE.Mesh(new THREE.RingGeometry(8.5, 8.9, 8), brassTrimMat);
     innerRing.rotation.x = -Math.PI / 2;
-    innerRing.position.y = 0.11;
+    innerRing.position.y = 0.084;
     scene.add(innerRing);
 
-    // 四向石板大道
-    const nsRoad = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.14, 62), stoneMat);
-    nsRoad.position.set(0, 0.04, 9);
+    // 3. 四向风化青苔石板主道（顶面精确位于 y = 0.06）
+    const nsRoadGeo = new THREE.BoxGeometry(5.2, 0.14, 63.6);
+    const nsTexMat = roadStoneMat.clone();
+    nsTexMat.map = roadStoneMat.map.clone();
+    nsTexMat.map.repeat.set(1.2, 14);
+    nsTexMat.map.needsUpdate = true;
+    const nsRoad = new THREE.Mesh(nsRoadGeo, nsTexMat);
+    nsRoad.position.set(0, -0.01, 10.8);
     nsRoad.receiveShadow = true;
     scene.add(nsRoad);
+    walkableMeshes.push(nsRoad);
 
-    const ewRoad = new THREE.Mesh(new THREE.BoxGeometry(66, 0.14, 4.6), stoneMat);
-    ewRoad.position.set(0, 0.04, -8);
+    const ewTexMat = roadStoneMat.clone();
+    ewTexMat.map = roadStoneMat.map.clone();
+    ewTexMat.map.repeat.set(14, 1.1);
+    ewTexMat.map.needsUpdate = true;
+    const ewRoad = new THREE.Mesh(new THREE.BoxGeometry(62.4, 0.14, 4.6), ewTexMat);
+    ewRoad.position.set(0, -0.01, -8);
     ewRoad.receiveShadow = true;
     scene.add(ewRoad);
+    walkableMeshes.push(ewRoad);
 
-    // 通往东南孤灯台的斜石径
-    const seRoad = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.14, 34), stoneMat);
-    seRoad.position.set(20, 0.12, 18);
-    seRoad.rotation.y = -Math.PI / 4;
-    seRoad.receiveShadow = true;
+    // 4. 东南贴坡石板小径
+    const seMat = roadStoneMat.clone();
+    seMat.map = roadStoneMat.map.clone();
+    seMat.map.repeat.set(1, 1);
+    seMat.map.needsUpdate = true;
+    const seRoad = createSlopedSERoadMesh(seMat);
     scene.add(seRoad);
+    walkableMeshes.push(seRoad);
 
-    // 北方拾级而上的哥特石阶
-    for (let i = 0; i < 12; i++) {
-      const t = i / 11;
-      const stepZ = -21.5 - t * 12;
-      const stepY = t * 3.15;
-      const step = new THREE.Mesh(new THREE.BoxGeometry(9.2, 0.42, 1.35), darkStoneMat);
-      step.position.set(0, stepY, stepZ);
+    // 5. 北方 12 级精确贴地哥特石阶（z 从 -21.0 升至 -34.0，顶面与 NORTH_STAIRS 完全一致）
+    const stepDepth = (NORTH_STAIRS.zStart - NORTH_STAIRS.zEnd) / NORTH_STAIRS.count;
+    for (let i = 0; i < NORTH_STAIRS.count; i++) {
+      const topY = ((i + 1) / NORTH_STAIRS.count) * NORTH_STAIRS.topHeight;
+      const centerZ = NORTH_STAIRS.zStart - (i + 0.5) * stepDepth;
+      const stepH = 0.72;
+      const step = new THREE.Mesh(
+        new THREE.BoxGeometry(NORTH_STAIRS.halfWidth * 2, stepH, stepDepth + 0.34),
+        darkStoneMat
+      );
+      step.position.set(0, topY - stepH * 0.5, centerZ);
       step.receiveShadow = true;
       step.castShadow = true;
       scene.add(step);
+      walkableMeshes.push(step);
     }
 
-    // 北方钟楼石板平台
-    const northPlaza = new THREE.Mesh(new THREE.BoxGeometry(24, 0.5, 22), stoneMat);
-    northPlaza.position.set(0, 3.05, -45);
+    // 6. 北方钟楼星盘青石平台（顶面精确位于 y = 3.22）
+    const northPlaza = new THREE.Mesh(new THREE.BoxGeometry(24, 0.5, 22), northPlazaMat);
+    northPlaza.position.set(0, 2.97, -45);
     northPlaza.receiveShadow = true;
     scene.add(northPlaza);
+    walkableMeshes.push(northPlaza);
+  }
+
+  /**
+   * 地面宝石彩窗投影光斑贴花
+   */
+  function addStainedGlassDecal(x, y, z, radius, opacity) {
+    const projTex = Oublier.Models3D.createStainedGlassTexture("projection");
+    const mat = new THREE.MeshBasicMaterial({
+      map: projTex,
+      transparent: true,
+      opacity: opacity || 0.46,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const decal = new THREE.Mesh(new THREE.CircleGeometry(radius, 32), mat);
+    decal.rotation.x = -Math.PI / 2;
+    decal.position.set(x, y + 0.018, z);
+    scene.add(decal);
   }
 
   function buildGothicArchitecture() {
     // 1. 中央圣火坛 + 环绕八柱哥特尖拱庭院
     brazierObj = Oublier.Models3D.createBrazier(darkStoneMat, ironMat, glowTex);
+    brazierObj.group.position.y = 0.08;
     scene.add(brazierObj.group);
 
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
       const radius = 14.8;
-      const arch = Oublier.Models3D.createGothicArch(5.4, 6.8, 0.85, stoneMat, darkStoneMat);
-      arch.position.set(Math.cos(a) * radius, 0, Math.sin(a) * radius);
+      const arch = Oublier.Models3D.createGothicArch(5.4, 6.8, 0.85, stoneMat, darkStoneMat, glassMat);
+      arch.position.set(Math.cos(a) * radius, 0.08, Math.sin(a) * radius);
       arch.rotation.y = -a + Math.PI / 2;
       scene.add(arch);
     }
 
-    // 沿主路摆放哥特锻铁路灯
+    // 中央庭院与拱门地面微光花窗映彩
+    addStainedGlassDecal(0, 0.08, -11.2, 2.6, 0.28);
+
+    // 沿主路摆放哥特锻铁路灯（精确落于地表）
     const glowMat = new THREE.MeshBasicMaterial({ color: 0xffd796 });
     const lanternPositions = [
-      [-4.2, 16, 0],
-      [4.2, 16, Math.PI],
-      [-4.2, 32, 0],
-      [4.2, 32, Math.PI],
-      [-5.2, -20, 0],
-      [5.2, -20, Math.PI],
+      [-3.8, 16, 0],
+      [3.8, 16, Math.PI],
+      [-3.8, 32, 0],
+      [3.8, 32, Math.PI],
+      [-5.2, -20.5, 0],
+      [5.2, -20.5, Math.PI],
       [-6.5, -36, 0],
       [6.5, -36, Math.PI],
       [-23, -11, Math.PI / 2],
@@ -396,34 +629,36 @@
     ];
     lanternPositions.forEach(function (lp) {
       const l = Oublier.Models3D.createGothicLantern(3.4, ironMat, glowMat, glowTex);
-      const y = getGroundHeight(lp[0], lp[1]);
+      const y = getSurfaceHeight(lp[0], lp[1]);
       l.position.set(lp[0], y, lp[1]);
       l.rotation.y = lp[2];
       scene.add(l);
     });
 
-    // 2. 北方观星钟楼 & 玫瑰窗
+    // 2. 北方观星钟楼 & 宝石彩绘玫瑰窗 + 地面绚丽彩光投射
     bellTowerObj = Oublier.Models3D.createBellTower(stoneMat, darkStoneMat, roofMat, glassMat, glowTex);
-    bellTowerObj.group.position.set(0, 3.25, -55.5);
+    bellTowerObj.group.position.set(0, 3.22, -55.5);
     scene.add(bellTowerObj.group);
+    addStainedGlassDecal(0, 3.22, -45.5, 5.4, 0.44);
 
-    // 3. 西方回声长廊（6组对称哥特尖拱列柱 + 悬吊风钟）
-    const cloisterFloor = new THREE.Mesh(new THREE.BoxGeometry(26, 0.4, 11), stoneMat);
-    cloisterFloor.position.set(-44, 0.72, -8);
+    // 3. 西方回声长廊（对称尖拱列柱 + 古典棋盘地砖 + 悬吊风钟 + 花窗微光）
+    const cloisterFloor = new THREE.Mesh(new THREE.BoxGeometry(26, 0.4, 11), cloisterFloorMat);
+    cloisterFloor.position.set(-44, 0.7, -8);
     cloisterFloor.receiveShadow = true;
     scene.add(cloisterFloor);
+    walkableMeshes.push(cloisterFloor);
 
     for (let i = 0; i < 6; i++) {
       const ax = -33 - i * 4.6;
-      const arch = Oublier.Models3D.createGothicArch(6.8, 7.2, 0.9, stoneMat, darkStoneMat);
-      arch.position.set(ax, 0.85, -8);
+      const arch = Oublier.Models3D.createGothicArch(6.8, 7.2, 0.9, stoneMat, darkStoneMat, glassMat);
+      arch.position.set(ax, 0.9, -8);
       arch.rotation.y = Math.PI / 2;
       scene.add(arch);
     }
+    addStainedGlassDecal(-46, 0.9, -8, 3.3, 0.34);
 
-    // 悬吊黄铜风钟
     resonanceBellPivot = new THREE.Group();
-    resonanceBellPivot.position.set(-46, 6.2, -8);
+    resonanceBellPivot.position.set(-46, 6.25, -8);
     const bellMat = new THREE.MeshStandardMaterial({ color: 0xd5b07a, roughness: 0.38, metalness: 0.75 });
     const bellCord = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.8, 6), ironMat);
     bellCord.position.y = -0.9;
@@ -433,14 +668,15 @@
     resonanceBellPivot.add(bellBody);
     scene.add(resonanceBellPivot);
 
-    // 4. 东方柏林石亭 & 静谧石椅
-    const eastFloor = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 7.0, 0.35, 8), stoneMat);
-    eastFloor.position.set(46, 0.75, -8);
+    // 4. 东方柏林石亭 & 静谧石椅（顶面精确位于 y = 0.90）
+    const eastFloor = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 7.0, 0.35, 8), roadStoneMat);
+    eastFloor.position.set(46, 0.725, -8);
     eastFloor.receiveShadow = true;
     scene.add(eastFloor);
+    walkableMeshes.push(eastFloor);
 
-    const ruinedArch = Oublier.Models3D.createGothicArch(5.6, 6.2, 0.8, stoneMat, darkStoneMat);
-    ruinedArch.position.set(48, 0.85, -11.5);
+    const ruinedArch = Oublier.Models3D.createGothicArch(5.6, 6.2, 0.8, stoneMat, darkStoneMat, glassMat);
+    ruinedArch.position.set(48, 0.9, -11.5);
     ruinedArch.rotation.y = -0.35;
     scene.add(ruinedArch);
 
@@ -460,23 +696,24 @@
     benchLantern.position.set(43.2, 0.9, -7.2);
     scene.add(benchLantern);
 
-    // 5. 东南孤灯望海台
-    const overlookBase = new THREE.Mesh(new THREE.CylinderGeometry(7.2, 8.0, 0.5, 8), stoneMat);
-    overlookBase.position.set(38, 1.75, 36);
+    // 5. 东南孤灯望海台（顶面精确位于 y = 1.92）
+    const overlookBase = new THREE.Mesh(new THREE.CylinderGeometry(7.2, 8.0, 0.5, 8), roadStoneMat);
+    overlookBase.position.set(38, 1.67, 36);
     overlookBase.receiveShadow = true;
     scene.add(overlookBase);
+    walkableMeshes.push(overlookBase);
 
     const watchTower = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.5, 8.2, 8), darkStoneMat);
-    watchTower.position.set(42, 5.8, 39);
+    watchTower.position.set(42, 6.02, 39);
     watchTower.castShadow = true;
     scene.add(watchTower);
 
     const towerRoof = new THREE.Mesh(new THREE.ConeGeometry(1.75, 2.8, 8), roofMat);
-    towerRoof.position.set(42, 11.8, 39);
+    towerRoof.position.set(42, 12.02, 39);
     scene.add(towerRoof);
 
     const towerBeacon = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0), glowMat);
-    towerBeacon.position.set(42, 10.1, 39);
+    towerBeacon.position.set(42, 10.32, 39);
     scene.add(towerBeacon);
 
     const towerHalo = new THREE.Sprite(
@@ -489,60 +726,144 @@
         depthWrite: false
       })
     );
-    towerHalo.position.set(42, 10.1, 39);
+    towerHalo.position.set(42, 10.32, 39);
     towerHalo.scale.set(6.5, 6.5, 1);
     scene.add(towerHalo);
 
-    // 6. 南方水门尖拱 & 潮汐石栈桥
-    const waterGate = Oublier.Models3D.createGothicArch(6.4, 7.4, 1.1, darkStoneMat, stoneMat);
-    waterGate.position.set(0, 0.15, 42);
+    // 6. 南方水门尖拱 & 潮汐木石栈桥
+    const waterGate = Oublier.Models3D.createGothicArch(6.4, 7.4, 1.1, darkStoneMat, stoneMat, glassMat);
+    waterGate.position.set(0, 0.06, 42);
     scene.add(waterGate);
 
-    pierObj = Oublier.Models3D.createGothicPier(stoneMat, woodMat, ironMat, glowMat, glowTex);
+    pierObj = Oublier.Models3D.createGothicPier(stoneMat, woodDeckMat, ironMat, glowMat, glowTex);
     scene.add(pierObj.group);
+    walkableMeshes.push(pierObj.deck);
 
-    // 环岛哥特修长柏树林
-    const treeSpecs = [
-      [39, -15, 1.15],
-      [44, -18, 1.32],
-      [51, -13, 1.1],
-      [51, -2, 1.24],
-      [41, 2, 0.95],
-      [-20, -34, 1.28],
-      [20, -34, 1.22],
-      [-26, -42, 1.1],
-      [26, -42, 1.15],
-      [-35, 14, 1.18],
-      [-43, 22, 1.05],
-      [-26, 29, 1.12],
-      [23, 26, 1.02],
-      [-15, 36, 0.96],
-      [16, 36, 1.0]
+    // 7. 多元哥特植物与蜡烛点缀（保持开阔视线与道路通畅）
+    // 7a. 环岛修长翠柏
+    const cypressSpecs = [
+      [39, -15, 1.12],
+      [51, -13, 1.08],
+      [52, -2, 1.2],
+      [-20, -34, 1.24],
+      [20, -34, 1.18],
+      [-26, -42, 1.08],
+      [26, -42, 1.12],
+      [-35, 14, 1.14],
+      [-43, 22, 1.02],
+      [-26, 29, 1.08],
+      [-15, 36, 0.94],
+      [16, 36, 0.98]
     ];
-    treeSpecs.forEach(function (sp, idx) {
+    cypressSpecs.forEach(function (sp, idx) {
       const tree = Oublier.Models3D.createCypressTree(sp[2], foliageDarkMat, foliageLightMat, woodMat);
-      tree.group.position.set(sp[0], getGroundHeight(sp[0], sp[1]) - 0.1, sp[1]);
+      tree.group.position.set(sp[0], getGroundHeight(sp[0], sp[1]) - 0.06, sp[1]);
       tree.phase = idx * 0.7;
       scene.add(tree.group);
-      cypressTrees.push(tree);
+      swayTrees.push(tree);
+    });
+
+    // 7b. 暖金哥特银杏树（与翠柏形成金绿冷暖撞色）
+    const ginkgoSpecs = [
+      [37, -1, 1.05],
+      [44, -18, 1.18],
+      [18, 12, 0.95],
+      [-19, 14, 1.02],
+      [-15, -24, 0.96],
+      [24, 26, 1.06]
+    ];
+    ginkgoSpecs.forEach(function (sp, idx) {
+      const tree = Oublier.Models3D.createGinkgoTree(sp[2], woodMat);
+      tree.group.position.set(sp[0], getGroundHeight(sp[0], sp[1]) - 0.05, sp[1]);
+      tree.phase = idx * 1.1 + 0.4;
+      scene.add(tree.group);
+      swayTrees.push(tree);
+    });
+
+    // 7c. 深红/绯粉哥特蔷薇花丛（点缀庭院拱柱旁、东侧石亭、回廊外侧）
+    const roseSpecs = [
+      [-12.5, 10.5, 1.05, "crimson"],
+      [12.5, 10.5, 1.0, "pink"],
+      [-12.5, -10.5, 1.0, "wine"],
+      [12.5, -10.5, 1.08, "crimson"],
+      [40.2, -4.5, 1.12, "crimson"],
+      [40.8, -11.8, 1.0, "pink"],
+      [50.5, -4.2, 1.1, "wine"],
+      [-32.5, -13.8, 0.98, "crimson"],
+      [-38.5, -13.8, 1.05, "pink"],
+      [-49.5, -2.0, 1.02, "wine"],
+      [-5.6, 38.5, 1.0, "crimson"],
+      [5.6, 38.5, 1.04, "pink"],
+      [-8.5, -43.5, 1.05, "crimson"],
+      [8.5, -43.5, 1.0, "wine"]
+    ];
+    roseSpecs.forEach(function (rp) {
+      const bush = Oublier.Models3D.createRoseBush(rp[2], rp[3]);
+      bush.position.set(rp[0], getSurfaceHeight(rp[0], rp[1]) - 0.02, rp[1]);
+      bush.rotation.y = Math.random() * Math.PI * 2;
+      scene.add(bush);
+    });
+
+    // 7d. 蓝紫夜鸢尾与薰衣草花穗（沿主道草坡、东南悬崖、回廊与北阶旁错落分布）
+    const irisSpecs = [
+      [-4.6, 22, 1.05, "cobalt"],
+      [4.6, 23, 1.0, "lavender"],
+      [-4.8, 28, 0.95, "lavender"],
+      [4.8, 29, 1.08, "cobalt"],
+      [-7.2, -23.5, 1.1, "mixed"],
+      [7.2, -23.5, 1.05, "cobalt"],
+      [-7.5, -30, 1.0, "lavender"],
+      [7.5, -30, 1.06, "mixed"],
+      [-26, -12.5, 1.05, "cobalt"],
+      [26, -12.5, 1.0, "lavender"],
+      [-28, -4.0, 0.98, "mixed"],
+      [28, -4.0, 1.05, "cobalt"],
+      [22, 23, 1.08, "lavender"],
+      [27, 29, 1.12, "cobalt"],
+      [33, 30, 1.05, "mixed"],
+      [32, 41, 1.1, "lavender"],
+      [44, 32, 1.06, "cobalt"],
+      [-42, -2.0, 0.95, "lavender"]
+    ];
+    irisSpecs.forEach(function (ip) {
+      const iris = Oublier.Models3D.createIrisCluster(ip[2], ip[3]);
+      iris.position.set(ip[0], getSurfaceHeight(ip[0], ip[1]) - 0.02, ip[1]);
+      iris.rotation.y = Math.random() * Math.PI * 2;
+      scene.add(iris);
+    });
+
+    // 7e. 矮石座暖光蜂蜡烛群（柔和点亮圣火坛周边、钟楼台阶口与长廊柱脚）
+    const candleSpots = [
+      [-5.2, 5.2],
+      [5.2, -5.2],
+      [-5.6, -34.6],
+      [5.6, -34.6],
+      [-34.2, -4.0],
+      [41.5, -9.8],
+      [33.2, 34.5]
+    ];
+    candleSpots.forEach(function (cs) {
+      const shrine = Oublier.Models3D.createCandleShrine(darkStoneMat);
+      shrine.position.set(cs[0], getSurfaceHeight(cs[0], cs[1]), cs[1]);
+      scene.add(shrine);
     });
   }
 
   function buildEntitiesAndEffects() {
-    // 玩家 3D 角色
+    // 玩家 3D 角色（双靴精准贴地）
     player.rig = Oublier.Models3D.createCharacter({
       cloakColor: "#e6ecf5",
       scarfColor: "#e6ab72",
       hasLantern: true,
       glowTex: glowTex
     });
-    player.y = getGroundHeight(player.x, player.z);
+    player.y = getSurfaceHeight(player.x, player.z);
     player.rig.group.position.set(player.x, player.y, player.z);
     player.rig.group.rotation.y = player.yaw;
     scene.add(player.rig.group);
 
     // 随身提灯点光源
-    player.lanternLight = new THREE.PointLight(0xffb86b, 1.15, 16, 1.6);
+    player.lanternLight = new THREE.PointLight(0xffb86b, 1.25, 18, 1.5);
     player.lanternLight.position.set(0.45, 1.1, 0.25);
     player.rig.group.add(player.lanternLight);
 
@@ -557,15 +878,15 @@
         hasLantern: Boolean(t.hasLantern),
         glowTex: glowTex
       });
-      const y = getGroundHeight(t.home.x, t.home.z);
+      const y = getSurfaceHeight(t.home.x, t.home.z);
       rig.group.position.set(t.home.x, y, t.home.z);
       scene.add(rig.group);
 
       const hitMesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.1, 1.1, 2.6, 8),
+        new THREE.CylinderGeometry(1.25, 1.25, 2.8, 8),
         new THREE.MeshBasicMaterial({ visible: false })
       );
-      hitMesh.position.y = 1.25;
+      hitMesh.position.y = 1.3;
       hitMesh.userData = { kind: "traveler", item: t, refPos: rig.group.position };
       rig.group.add(hitMesh);
       hitTargets.push(hitMesh);
@@ -584,47 +905,61 @@
       );
     });
 
-    // 6 处地标点击碰撞体积 + 地面微光法阵圈
+    // 6 处地标点击碰撞体积 + 可呼吸高亮法阵光环
+    landmarkRings.length = 0;
     Oublier.Data.LANDMARKS.forEach(function (lm) {
-      const y = getGroundHeight(lm.x, lm.z);
-      const beaconRing = new THREE.Mesh(
-        new THREE.RingGeometry(1.5, 1.75, 24),
-        new THREE.MeshBasicMaterial({
-          color: 0xe6b57e,
-          transparent: true,
-          opacity: 0.35,
-          side: THREE.DoubleSide
-        })
-      );
+      const y = getSurfaceHeight(lm.x, lm.z);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xe6b57e,
+        transparent: true,
+        opacity: 0.34,
+        side: THREE.DoubleSide
+      });
+      const beaconRing = new THREE.Mesh(new THREE.RingGeometry(1.55, 1.85, 28), ringMat);
       beaconRing.rotation.x = -Math.PI / 2;
-      beaconRing.position.set(lm.x, y + 0.14, lm.z);
+      beaconRing.position.set(lm.x, y + 0.025, lm.z);
       scene.add(beaconRing);
+      landmarkRings.push({ id: lm.id, mesh: beaconRing, mat: ringMat });
 
       const hitMesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(2.6, 2.6, 4.6, 10),
+        new THREE.CylinderGeometry(2.8, 2.8, 5.0, 10),
         new THREE.MeshBasicMaterial({ visible: false })
       );
-      hitMesh.position.set(lm.x, y + 2.2, lm.z);
+      hitMesh.position.set(lm.x, y + 2.4, lm.z);
       hitMesh.userData = { kind: "landmark", item: lm };
       scene.add(hitMesh);
       hitTargets.push(hitMesh);
     });
 
-    // 地面点击引导光环
+    // 地面点击引导双环（贴地收敛）
     clickRingMesh = new THREE.Mesh(
-      new THREE.RingGeometry(0.45, 0.72, 24),
+      new THREE.RingGeometry(0.45, 0.68, 28),
       new THREE.MeshBasicMaterial({
         color: 0xaad3ff,
         transparent: true,
         opacity: 0,
-        side: THREE.DoubleSide
+        side: THREE.DoubleSide,
+        depthWrite: false
       })
     );
     clickRingMesh.rotation.x = -Math.PI / 2;
     scene.add(clickRingMesh);
 
+    clickRingInnerMesh = new THREE.Mesh(
+      new THREE.RingGeometry(0.16, 0.28, 20),
+      new THREE.MeshBasicMaterial({
+        color: 0xffe4aa,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+    clickRingInnerMesh.rotation.x = -Math.PI / 2;
+    scene.add(clickRingInnerMesh);
+
     // 3D 萤火虫
-    for (let i = 0; i < 36; i++) {
+    for (let i = 0; i < 38; i++) {
       const a = Math.random() * Math.PI * 2;
       const dist = 6 + Math.random() * 44;
       const fx = Math.cos(a) * dist;
@@ -644,7 +979,7 @@
       fireflyList.push({
         sprite: sp,
         baseX: fx,
-        baseY: getGroundHeight(fx, fz) + 1.2 + Math.random() * 2.2,
+        baseY: getSurfaceHeight(fx, fz) + 1.2 + Math.random() * 2.2,
         baseZ: fz,
         phase: Math.random() * Math.PI * 2,
         speed: 0.6 + Math.random() * 0.8
@@ -706,10 +1041,18 @@
     if (stoneMat) stoneMat.color.setHex(mood.stoneTint);
     if (darkStoneMat) darkStoneMat.color.setHex(mood.darkStoneTint);
     if (turfMat) turfMat.color.setHex(mood.turfTint);
+
+    // 细雨下路面与砖石更显湿润光泽
+    const wetRoughness = mood.rainIntensity > 0 ? 0.42 : 0.84;
+    if (courtyardMat) courtyardMat.roughness = wetRoughness;
+    if (roadStoneMat) roadStoneMat.roughness = wetRoughness + 0.04;
+    if (cloisterFloorMat) cloisterFloorMat.roughness = mood.rainIntensity > 0 ? 0.34 : 0.65;
+    if (northPlazaMat) northPlazaMat.roughness = wetRoughness;
+    if (woodDeckMat) woodDeckMat.roughness = mood.rainIntensity > 0 ? 0.55 : 0.88;
+
     if (starPoints) starPoints.material.opacity = mood.starAlpha;
     if (rainSystem.points) rainSystem.points.visible = mood.rainIntensity > 0;
 
-    // 更新天空穹顶渐变顶点色
     if (skyDome) {
       const topC = new THREE.Color(mood.skyTop);
       const horC = new THREE.Color(mood.skyHorizon);
@@ -748,6 +1091,16 @@
     return best;
   }
 
+  function getInteractivePosition(data) {
+    if (data.kind === "traveler") {
+      const tObj = travelers.find(function (tr) {
+        return tr.id === data.item.id;
+      });
+      if (tObj) return { x: tObj.x, z: tObj.z, range: 5.5 };
+    }
+    return { x: data.item.x, z: data.item.z, range: data.item.radius };
+  }
+
   function triggerTarget(target) {
     if (!target) return;
     if (target.kind === "landmark") {
@@ -767,121 +1120,141 @@
     return false;
   }
 
-  function handlePointerClick(clientX, clientY) {
-    if (callbacks.isInputBlocked()) return;
+  function updatePointerNDC(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
     pointerNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     pointerNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;
-
     raycaster.setFromCamera(pointerNDC, camera);
-    const hits = raycaster.intersectObjects(hitTargets, false);
-    if (hits.length > 0) {
-      const data = hits[0].object.userData;
-      let tx = data.item.x;
-      let tz = data.item.z;
-      if (data.kind === "traveler") {
-        const tObj = travelers.find(function (tr) {
-          return tr.id === data.item.id;
-        });
-        if (tObj) {
-          tx = tObj.x;
-          tz = tObj.z;
-        }
-      }
-      const dist = Math.hypot(player.x - tx, player.z - tz);
-      const range = data.kind === "landmark" ? data.item.radius - 0.5 : 5.2;
-      if (dist <= range) {
-        triggerTarget({ kind: data.kind, item: data.item });
-        return;
-      }
-      const clamped = clampWalkable(tx, tz);
-      player.target = clamped;
-      player.pendingAction = { kind: data.kind, item: data.item };
-      showGroundRing(clamped.x, clamped.z, 0xf2b073);
-      return;
-    }
+  }
 
-    // 与地面高度平面相交，点击任意位置漫步
+  function pickGroundDestination(clientX, clientY) {
+    updatePointerNDC(clientX, clientY);
+    const groundHits = raycaster.intersectObjects(walkableMeshes, false);
+    if (groundHits.length > 0) {
+      return clampWalkable(groundHits[0].point.x, groundHits[0].point.z);
+    }
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -player.y);
     const pt = new THREE.Vector3();
     if (raycaster.ray.intersectPlane(plane, pt)) {
-      const clamped = clampWalkable(pt.x, pt.z);
-      player.target = clamped;
-      player.pendingAction = null;
-      showGroundRing(clamped.x, clamped.z, 0xaad3ff);
+      return clampWalkable(pt.x, pt.z);
+    }
+    return null;
+  }
+
+  /**
+   * 纯左键点击移动 & 靠近后左键点击交互（支持按住左键持续牵引移动）
+   */
+  function handleLeftDown(clientX, clientY) {
+    if (callbacks.isInputBlocked() || overlookActive) return;
+    updatePointerNDC(clientX, clientY);
+
+    const hits = raycaster.intersectObjects(hitTargets, false);
+    if (hits.length > 0) {
+      const data = hits[0].object.userData;
+      const info = getInteractivePosition(data);
+      const dist = Math.hypot(player.x - info.x, player.z - info.z);
+
+      // 已在交互范围内 -> 左键点击直接交互（不进入拖走模式）
+      if (dist <= info.range) {
+        player.target = null;
+        leftHoldMoving = false;
+        triggerTarget({ kind: data.kind, item: data.item });
+        return;
+      }
+
+      // 尚在远处 -> 先走到目标旁边的舒适站立点，绝不远程弹窗误触
+      const dx = player.x - info.x;
+      const dz = player.z - info.z;
+      const len = Math.max(0.001, Math.hypot(dx, dz));
+      const standOffset = Math.min(info.range * 0.52, Math.max(2.6, info.range - 2.4));
+      const dest = clampWalkable(
+        info.x + (dx / len) * standOffset,
+        info.z + (dz / len) * standOffset
+      );
+      player.target = dest;
+      leftHoldMoving = false;
+      showGroundRing(dest.x, dest.z, 0xf2b073);
+      return;
+    }
+
+    // 点在空旷地面 -> 开始移动并允许按住左键丝滑牵引
+    const dest = pickGroundDestination(clientX, clientY);
+    if (dest) {
+      player.target = dest;
+      leftHoldMoving = true;
+      showGroundRing(dest.x, dest.z, 0xaad3ff);
     }
   }
 
   function showGroundRing(x, z, hex) {
-    if (!clickRingMesh) return;
-    clickRingMesh.position.set(x, getGroundHeight(x, z) + 0.16, z);
+    if (!clickRingMesh || !clickRingInnerMesh) return;
+    const sy = getSurfaceHeight(x, z) + 0.03;
+    clickRingMesh.position.set(x, sy, z);
     clickRingMesh.material.color.setHex(hex);
+    clickRingInnerMesh.position.set(x, sy + 0.004, z);
     clickRingAlpha = 0.95;
   }
 
   function bindEvents() {
     global.addEventListener("resize", resize);
 
-    global.addEventListener("keydown", function (e) {
-      if (callbacks.isInputBlocked()) return;
-      const code = e.code;
-      if (
-        code === "KeyW" || code === "KeyA" || code === "KeyS" || code === "KeyD" ||
-        code === "ArrowUp" || code === "ArrowDown" || code === "ArrowLeft" || code === "ArrowRight"
-      ) {
-        keys[code] = true;
-        player.target = null;
-        player.pendingAction = null;
-      } else if (code === "KeyE" || code === "Space") {
-        if (nearbyTarget || findClosestInteractive()) {
-          e.preventDefault();
-          interactCurrent();
-        }
-      }
-    });
-
-    global.addEventListener("keyup", function (e) {
-      keys[e.code] = false;
-    });
-
-    global.addEventListener("blur", function () {
-      Object.keys(keys).forEach(function (k) {
-        keys[k] = false;
-      });
+    // 禁用右键上下文菜单（右键暂时留空）
+    canvas.addEventListener("contextmenu", function (e) {
+      e.preventDefault();
     });
 
     canvas.addEventListener("pointerdown", function (e) {
-      pointerState.down = true;
-      pointerState.startX = e.clientX;
-      pointerState.startY = e.clientY;
-      pointerState.lastX = e.clientX;
-      pointerState.lastY = e.clientY;
-      pointerState.dragged = false;
+      // 仅响应左键或触屏点击
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      handleLeftDown(e.clientX, e.clientY);
     });
 
     global.addEventListener("pointermove", function (e) {
-      if (!pointerState.down) return;
-      const dx = e.clientX - pointerState.lastX;
-      const dy = e.clientY - pointerState.lastY;
-      pointerState.lastX = e.clientX;
-      pointerState.lastY = e.clientY;
-
-      if (Math.hypot(e.clientX - pointerState.startX, e.clientY - pointerState.startY) >= 6) {
-        pointerState.dragged = true;
+      if (callbacks.isInputBlocked() || overlookActive) {
+        leftHoldMoving = false;
+        if (canvas) canvas.style.cursor = "default";
+        hoveredTarget = null;
+        return;
       }
-      if (pointerState.dragged && !overlookActive && !callbacks.isInputBlocked()) {
-        camState.targetYaw -= dx * 0.0065;
-        camState.targetPitch = Math.max(0.20, Math.min(0.88, camState.targetPitch + dy * 0.0045));
+
+      if (leftHoldMoving) {
+        const dest = pickGroundDestination(e.clientX, e.clientY);
+        if (dest) {
+          player.target = dest;
+        }
+        return;
+      }
+
+      // 悬停提示：仅当指针落在玩家已靠近的可交互对象上时切换手型光标
+      if (e.target === canvas) {
+        updatePointerNDC(e.clientX, e.clientY);
+        const hits = raycaster.intersectObjects(hitTargets, false);
+        if (hits.length > 0) {
+          const data = hits[0].object.userData;
+          const info = getInteractivePosition(data);
+          const dist = Math.hypot(player.x - info.x, player.z - info.z);
+          if (dist <= info.range) {
+            hoveredTarget = data.item.id;
+            canvas.style.cursor = "pointer";
+            return;
+          }
+        }
+        hoveredTarget = null;
+        canvas.style.cursor = "default";
       }
     });
 
-    global.addEventListener("pointerup", function (e) {
-      if (!pointerState.down) return;
-      const wasDragged = pointerState.dragged;
-      pointerState.down = false;
-      if (!wasDragged && e.target === canvas) {
-        handlePointerClick(e.clientX, e.clientY);
-      }
+    global.addEventListener("pointerup", function () {
+      leftHoldMoving = false;
+    });
+
+    global.addEventListener("pointercancel", function () {
+      leftHoldMoving = false;
+    });
+
+    global.addEventListener("blur", function () {
+      leftHoldMoving = false;
+      hoveredTarget = null;
     });
 
     canvas.addEventListener(
@@ -889,7 +1262,7 @@
       function (e) {
         if (callbacks.isInputBlocked() || overlookActive) return;
         e.preventDefault();
-        camState.targetDist = Math.max(11, Math.min(27, camState.targetDist + e.deltaY * 0.012));
+        camState.targetDist = Math.max(17.5, Math.min(38.0, camState.targetDist + e.deltaY * 0.015));
       },
       { passive: false }
     );
@@ -911,40 +1284,33 @@
     return diff;
   }
 
+  /**
+   * 让人物脚底接触阴影紧贴地面坡度法线
+   */
+  function alignShadowToGround(rig, x, z, charYaw) {
+    if (!rig || !rig.shadowGroup) return;
+    const n = getSurfaceNormal(x, z);
+    // 将世界法线转换至角色局部空间以匹配斜坡倾角
+    const cosY = Math.cos(-charYaw);
+    const sinY = Math.sin(-charYaw);
+    const lx = n.x * cosY - n.z * sinY;
+    const lz = n.x * sinY + n.z * cosY;
+    rig.shadowGroup.rotation.z = -Math.asin(Math.max(-0.5, Math.min(0.5, lx)));
+    rig.shadowGroup.rotation.x = Math.asin(Math.max(-0.5, Math.min(0.5, lz)));
+  }
+
   function updatePlayer(dt) {
-    let inputX = 0;
-    let inputZ = 0;
-
-    if (!callbacks.isInputBlocked()) {
-      if (keys.KeyW || keys.ArrowUp) inputZ -= 1;
-      if (keys.KeyS || keys.ArrowDown) inputZ += 1;
-      if (keys.KeyA || keys.ArrowLeft) inputX -= 1;
-      if (keys.KeyD || keys.ArrowRight) inputX += 1;
-    }
-
     let moveX = 0;
     let moveZ = 0;
 
-    if (inputX !== 0 || inputZ !== 0) {
-      const len = Math.hypot(inputX, inputZ);
-      inputX /= len;
-      inputZ /= len;
-      // 根据当前相机 yaw 旋转移动方向
-      const sinY = Math.sin(camState.yaw);
-      const cosY = Math.cos(camState.yaw);
-      moveX = inputX * cosY + inputZ * sinY;
-      moveZ = -inputX * sinY + inputZ * cosY;
-    } else if (player.target) {
+    if (!callbacks.isInputBlocked() && player.target) {
       const dx = player.target.x - player.x;
       const dz = player.target.z - player.z;
       const dist = Math.hypot(dx, dz);
-      const stopDist = player.pendingAction ? 4.0 : 0.7;
+      const stopDist = leftHoldMoving ? 0.35 : 0.45;
       if (dist <= stopDist) {
-        const pending = player.pendingAction;
-        player.target = null;
-        player.pendingAction = null;
-        if (pending) {
-          triggerTarget(pending);
+        if (!leftHoldMoving) {
+          player.target = null;
         }
       } else {
         moveX = dx / dist;
@@ -954,19 +1320,23 @@
 
     const movingSpeed = Math.hypot(moveX, moveZ) * player.speed;
     if (movingSpeed > 0.1) {
-      const next = clampWalkable(player.x + moveX * player.speed * dt, player.z + moveZ * player.speed * dt);
+      const next = clampWalkable(
+        player.x + moveX * player.speed * dt,
+        player.z + moveZ * player.speed * dt
+      );
       player.x = next.x;
       player.z = next.z;
       const targetYaw = Math.atan2(moveX, moveZ);
-      player.yaw += shortestAngleDiff(player.yaw, targetYaw) * Math.min(1, dt * 11);
+      player.yaw += shortestAngleDiff(player.yaw, targetYaw) * Math.min(1, dt * 13);
     }
 
-    const targetY = getGroundHeight(player.x, player.z);
-    player.y += (targetY - player.y) * Math.min(1, dt * 12);
+    const targetY = getSurfaceHeight(player.x, player.z);
+    player.y += (targetY - player.y) * Math.min(1, dt * 26);
 
     if (player.rig) {
       player.rig.group.position.set(player.x, player.y, player.z);
       player.rig.group.rotation.y = player.yaw;
+      alignShadowToGround(player.rig, player.x, player.z, player.yaw);
       Oublier.Models3D.animateCharacter(player.rig, dt, movingSpeed / player.speed, elapsed);
     }
 
@@ -1008,10 +1378,12 @@
         }
       }
 
-      t.y = getGroundHeight(t.x, t.z);
+      const surfY = getSurfaceHeight(t.x, t.z);
+      t.y += (surfY - t.y) * Math.min(1, dt * 20);
       if (t.rig) {
         t.rig.group.position.set(t.x, t.y, t.z);
         t.rig.group.rotation.y = t.yaw;
+        alignShadowToGround(t.rig, t.x, t.z, t.yaw);
         Oublier.Models3D.animateCharacter(t.rig, dt, speedRatio, elapsed + t.home.x);
       }
     });
@@ -1019,7 +1391,6 @@
 
   function updateCamera(dt) {
     if (overlookActive) {
-      // 全景远眺模式：从东南悬崖上方回望整座哥特修道院与夜海
       const desiredPos = new THREE.Vector3(58, 22, 54);
       const desiredLook = new THREE.Vector3(0, 6, -12);
       camera.position.lerp(desiredPos, Math.min(1, dt * 2.5));
@@ -1028,24 +1399,25 @@
       return;
     }
 
-    camState.yaw += (camState.targetYaw - camState.yaw) * Math.min(1, dt * 8);
-    camState.pitch += (camState.targetPitch - camState.pitch) * Math.min(1, dt * 8);
     camState.dist += (camState.targetDist - camState.dist) * Math.min(1, dt * 8);
+    // 俯视角随拉远轻微抬高，呈现《英雄联盟》式的开阔俯瞰视感
+    const distRatio = (camState.dist - 17.5) / (38.0 - 17.5);
+    const targetPitch = 0.88 + distRatio * 0.16;
+    camState.pitch += (targetPitch - camState.pitch) * Math.min(1, dt * 8);
 
     const horiz = Math.cos(camState.pitch) * camState.dist;
     const camX = player.x + Math.sin(camState.yaw) * horiz;
-    const camY = player.y + 1.8 + Math.sin(camState.pitch) * camState.dist;
+    const camY = player.y + 1.4 + Math.sin(camState.pitch) * camState.dist;
     const camZ = player.z + Math.cos(camState.yaw) * horiz;
 
     camera.position.lerp(new THREE.Vector3(camX, camY, camZ), Math.min(1, dt * 9));
-    camState.lookAt.lerp(new THREE.Vector3(player.x, player.y + 1.6, player.z), Math.min(1, dt * 10));
+    camState.lookAt.lerp(new THREE.Vector3(player.x, player.y + 0.9, player.z), Math.min(1, dt * 10));
     camera.lookAt(camState.lookAt);
   }
 
   function updateWorldEffects(dt) {
     const mood = Oublier.Data.MOODS[currentMoodId] || Oublier.Data.MOODS.midnight;
 
-    // 圣火坛火焰跃动
     if (brazierObj) {
       const f = 1 + Math.sin(elapsed * 12) * 0.08 + Math.cos(elapsed * 19) * 0.06;
       brazierObj.outerFlame.scale.set(1, f, 1);
@@ -1056,25 +1428,21 @@
       fireLight.intensity = 2.4 + Math.sin(elapsed * 11) * 0.25 + Math.cos(elapsed * 17) * 0.15;
     }
 
-    // 北方星象仪缓慢旋转
     if (bellTowerObj && bellTowerObj.astrolabe) {
       bellTowerObj.astrolabe.rotation.y += dt * 0.45;
       bellTowerObj.astrolabe.rotation.z = Math.sin(elapsed * 0.4) * 0.15;
     }
 
-    // 柏树随海风轻摆
-    cypressTrees.forEach(function (tree) {
+    swayTrees.forEach(function (tree) {
       tree.swayPivot.rotation.z = Math.sin(elapsed * 1.1 + tree.phase) * 0.025;
       tree.swayPivot.rotation.x = Math.cos(elapsed * 0.8 + tree.phase) * 0.018;
     });
 
-    // 栈桥漂浮瓶随海浪起伏
     if (pierObj && pierObj.bottleGroup) {
       pierObj.bottleGroup.position.y = -0.45 + Math.sin(elapsed * 2.0) * 0.16;
       pierObj.bottleGroup.rotation.x = Math.sin(elapsed * 1.6) * 0.15;
     }
 
-    // 3D 海面波浪微动
     if (seaMesh && seaBaseY) {
       const pos = seaMesh.geometry.attributes.position;
       for (let i = 0; i < pos.count; i++) {
@@ -1086,31 +1454,44 @@
       pos.needsUpdate = true;
     }
 
-    // 风钟摆动衰减
     if (resonanceBellPivot && bellSwingAmp > 0.002) {
       resonanceBellPivot.rotation.z = Math.sin(elapsed * 5.2) * bellSwingAmp;
       bellSwingAmp *= Math.max(0, 1 - dt * 0.65);
     }
 
-    // 点击地面光圈衰减
-    if (clickRingMesh && clickRingAlpha > 0) {
-      clickRingAlpha = Math.max(0, clickRingAlpha - dt * 1.15);
+    // 地标光环：接近或悬停时柔和亮起呼吸提示可点击交互
+    const activeId = nearbyTarget && nearbyTarget.kind === "landmark" ? nearbyTarget.item.id : null;
+    landmarkRings.forEach(function (lr) {
+      const isNear = lr.id === activeId;
+      const isHover = lr.id === hoveredTarget;
+      const pulse = 0.5 + 0.5 * Math.sin(elapsed * 3.4);
+      const targetOpacity = isNear ? (isHover ? 0.9 : 0.62 + pulse * 0.22) : 0.28;
+      lr.mat.opacity += (targetOpacity - lr.mat.opacity) * Math.min(1, dt * 10);
+      const targetScale = isNear ? 1.1 + pulse * 0.08 : 1.0;
+      lr.mesh.scale.set(targetScale, targetScale, 1);
+    });
+
+    // 地面点击引导双环衰减动画
+    if (clickRingMesh && clickRingInnerMesh && clickRingAlpha > 0) {
+      clickRingAlpha = Math.max(0, clickRingAlpha - dt * 1.4);
       clickRingMesh.material.opacity = clickRingAlpha;
-      const s = 1 + (1 - clickRingAlpha) * 0.7;
-      clickRingMesh.scale.set(s, s, 1);
+      clickRingInnerMesh.material.opacity = clickRingAlpha * 0.85;
+      const sOuter = 1.15 - (1 - clickRingAlpha) * 0.45;
+      const sInner = 0.7 + (1 - clickRingAlpha) * 0.9;
+      clickRingMesh.scale.set(sOuter, sOuter, 1);
+      clickRingInnerMesh.scale.set(sInner, sInner, 1);
     }
 
-    // 萤火虫游荡
     fireflyList.forEach(function (f) {
       f.sprite.position.set(
         f.baseX + Math.sin(elapsed * f.speed + f.phase) * 1.6,
         f.baseY + Math.cos(elapsed * f.speed * 0.8 + f.phase) * 0.65,
         f.baseZ + Math.cos(elapsed * f.speed * 0.9 + f.phase) * 1.6
       );
-      f.sprite.material.opacity = mood.fireflyAlpha * (0.4 + 0.6 * (0.5 + 0.5 * Math.sin(elapsed * 2.5 + f.phase)));
+      f.sprite.material.opacity =
+        mood.fireflyAlpha * (0.4 + 0.6 * (0.5 + 0.5 * Math.sin(elapsed * 2.5 + f.phase)));
     });
 
-    // 3D 细雨下落
     if (rainSystem.points && rainSystem.points.visible) {
       const rp = rainSystem.positions;
       for (let i = 0; i < rainSystem.count; i++) {
@@ -1125,7 +1506,6 @@
       rainSystem.points.geometry.attributes.position.needsUpdate = true;
     }
 
-    // 火星粒子
     if (Math.random() < dt * 10) {
       spawnEmber(0, 1.9, 0, 1);
     }
@@ -1143,7 +1523,6 @@
       }
     }
 
-    // 升空碎句文字精灵
     for (let i = floatingSprites.length - 1; i >= 0; i--) {
       const fs = floatingSprites[i];
       fs.life += dt;
@@ -1156,7 +1535,6 @@
       }
     }
 
-    // 飞翔中的漂流瓶
     for (let i = flyingBottles.length - 1; i >= 0; i--) {
       const fb = flyingBottles[i];
       fb.t += dt / fb.duration;
@@ -1174,7 +1552,6 @@
       }
     }
 
-    // 地面/水面光环波纹
     for (let i = ripples.length - 1; i >= 0; i--) {
       const rp = ripples[i];
       rp.life += dt;
@@ -1225,7 +1602,7 @@
       })
     );
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(x, y + 0.15, z);
+    mesh.position.set(x, y + 0.04, z);
     scene.add(mesh);
     ripples.push({ mesh: mesh, life: 0, maxLife: 1.4, maxScale: maxScale || 4.5 });
   }
@@ -1234,7 +1611,7 @@
     for (let i = 0; i < 40; i++) {
       spawnEmber(0, 2.0, 0, 2.3);
     }
-    spawnRipple(0, 0.15, 0, 0xffbe73, 7.5);
+    spawnRipple(0, 0.08, 0, 0xffbe73, 7.5);
     const clean = String(textSnippet || "").trim();
     if (clean) {
       const sp = Oublier.Models3D.createTextSprite(clean);
@@ -1267,7 +1644,7 @@
   function triggerHeartRipple(x, z) {
     const tx = typeof x === "number" ? x : player.x;
     const tz = typeof z === "number" ? z : player.z;
-    spawnRipple(tx, getGroundHeight(tx, tz), tz, 0xffcfa0, 4.2);
+    spawnRipple(tx, getSurfaceHeight(tx, tz), tz, 0xffcfa0, 4.2);
   }
 
   function triggerBellWave() {
@@ -1343,58 +1720,143 @@
     });
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.toneMappingExposure = 1.15;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x101828, 0.0085);
+    scene.fog = new THREE.FogExp2(0x121b2e, 0.0058);
 
-    camera = new THREE.PerspectiveCamera(48, 16 / 9, 0.2, 420);
+    // 40 度经典高俯视焦段，透视自然舒展
+    camera = new THREE.PerspectiveCamera(40, 16 / 9, 0.4, 420);
 
     glowTex = Oublier.Models3D.createGlowTexture(
       "rgba(255, 224, 175, 0.95)",
       "rgba(235, 165, 95, 0.18)"
     );
 
-    // 共享极简哥特材质
-    stoneMat = new THREE.MeshStandardMaterial({ color: 0x525a6b, roughness: 0.9, metalness: 0.06, flatShading: true });
-    darkStoneMat = new THREE.MeshStandardMaterial({ color: 0x323846, roughness: 0.88, metalness: 0.08, flatShading: true });
-    roofMat = new THREE.MeshStandardMaterial({ color: 0x202634, roughness: 0.78, metalness: 0.14, flatShading: true });
-    turfMat = new THREE.MeshStandardMaterial({ color: 0x1b2430, roughness: 0.95, metalness: 0.02, flatShading: true });
+    // 程序化真实 PBR 材质集
+    const turfTex = Oublier.Models3D.createTurfTextureSet(22, 22);
+    turfMat = new THREE.MeshStandardMaterial({
+      color: 0xb6cab8,
+      map: turfTex.map,
+      bumpMap: turfTex.bumpMap,
+      bumpScale: 0.16,
+      roughnessMap: turfTex.roughnessMap,
+      roughness: 0.92,
+      metalness: 0.02,
+      vertexColors: true
+    });
+
+    const ashlarTex = Oublier.Models3D.createAshlarStoneTextureSet(2, 2, false);
+    stoneMat = new THREE.MeshStandardMaterial({
+      color: 0xd0d7e4,
+      map: ashlarTex.map,
+      bumpMap: ashlarTex.bumpMap,
+      bumpScale: 0.08,
+      roughness: 0.86,
+      metalness: 0.06
+    });
+
+    const darkAshlarTex = Oublier.Models3D.createAshlarStoneTextureSet(2, 2, true);
+    darkStoneMat = new THREE.MeshStandardMaterial({
+      color: 0x9aa4b8,
+      map: darkAshlarTex.map,
+      bumpMap: darkAshlarTex.bumpMap,
+      bumpScale: 0.08,
+      roughness: 0.84,
+      metalness: 0.08
+    });
+
+    const courtyardTex = Oublier.Models3D.createCourtyardMosaicTextureSet();
+    courtyardMat = new THREE.MeshStandardMaterial({
+      color: 0xdad5cd,
+      map: courtyardTex.map,
+      bumpMap: courtyardTex.bumpMap,
+      bumpScale: 0.08,
+      roughnessMap: courtyardTex.roughnessMap,
+      roughness: 0.82,
+      metalness: 0.12
+    });
+
+    const flagTex = Oublier.Models3D.createFlagstoneTextureSet(1, 1, false);
+    roadStoneMat = new THREE.MeshStandardMaterial({
+      color: 0xd4d6de,
+      map: flagTex.map,
+      bumpMap: flagTex.bumpMap,
+      bumpScale: 0.09,
+      roughnessMap: flagTex.roughnessMap,
+      roughness: 0.86,
+      metalness: 0.06
+    });
+
+    const cloisterTex = Oublier.Models3D.createCloisterTileTextureSet(4, 1.8);
+    cloisterFloorMat = new THREE.MeshStandardMaterial({
+      color: 0xdadce2,
+      map: cloisterTex.map,
+      bumpMap: cloisterTex.bumpMap,
+      bumpScale: 0.06,
+      roughnessMap: cloisterTex.roughnessMap,
+      roughness: 0.65,
+      metalness: 0.12
+    });
+
+    const northTex = Oublier.Models3D.createNorthPlazaTextureSet();
+    northPlazaMat = new THREE.MeshStandardMaterial({
+      color: 0xd0d8e8,
+      map: northTex.map,
+      bumpMap: northTex.bumpMap,
+      bumpScale: 0.08,
+      roughnessMap: northTex.roughnessMap,
+      roughness: 0.8,
+      metalness: 0.12
+    });
+
+    const woodPlankTex = Oublier.Models3D.createWoodPlankTextureSet(1, 3.2);
+    woodDeckMat = new THREE.MeshStandardMaterial({
+      color: 0xd2beb0,
+      map: woodPlankTex.map,
+      bumpMap: woodPlankTex.bumpMap,
+      bumpScale: 0.09,
+      roughnessMap: woodPlankTex.roughnessMap,
+      roughness: 0.88,
+      metalness: 0.04
+    });
+
+    roofMat = new THREE.MeshStandardMaterial({ color: 0x2a3346, roughness: 0.74, metalness: 0.16, flatShading: true });
     glassMat = new THREE.MeshStandardMaterial({
-      color: 0x9ab8ff,
-      emissive: 0x6b8ef2,
-      emissiveIntensity: 0.85,
+      color: 0xc2a8ff,
+      emissive: 0x9b72f2,
+      emissiveIntensity: 0.9,
       roughness: 0.25
     });
-    ironMat = new THREE.MeshStandardMaterial({ color: 0x181c24, roughness: 0.55, metalness: 0.72 });
-    woodMat = new THREE.MeshStandardMaterial({ color: 0x3c2e28, roughness: 0.88, flatShading: true });
-    foliageDarkMat = new THREE.MeshStandardMaterial({ color: 0x16242c, roughness: 0.9, flatShading: true });
-    foliageLightMat = new THREE.MeshStandardMaterial({ color: 0x1f333c, roughness: 0.88, flatShading: true });
+    ironMat = new THREE.MeshStandardMaterial({ color: 0x1e2430, roughness: 0.5, metalness: 0.75 });
+    woodMat = new THREE.MeshStandardMaterial({ color: 0x4b382e, roughness: 0.88, flatShading: true });
+    foliageDarkMat = new THREE.MeshStandardMaterial({ color: 0x1d3834, roughness: 0.88, flatShading: true });
+    foliageLightMat = new THREE.MeshStandardMaterial({ color: 0x2a4e46, roughness: 0.86, flatShading: true });
 
-    // 光照预算（1 半球光 + 1 阴影主月光 + 4 战略点光源）
-    hemiLight = new THREE.HemisphereLight(0x5c7aa6, 0x181c28, 0.72);
+    // 光照预算（1 半球光 + 1 高精度阴影主月光 + 3 战略点光源 + 1 随身提灯）
+    hemiLight = new THREE.HemisphereLight(0x7694c2, 0x262d3d, 0.88);
     scene.add(hemiLight);
 
-    moonLight = new THREE.DirectionalLight(0xdce8ff, 1.05);
-    moonLight.position.set(-34, 54, -64);
+    moonLight = new THREE.DirectionalLight(0xe6efff, 1.22);
+    moonLight.position.set(-34, 58, -56);
     moonLight.castShadow = true;
-    moonLight.shadow.mapSize.set(1024, 1024);
+    moonLight.shadow.mapSize.set(2048, 2048);
     moonLight.shadow.camera.near = 10;
     moonLight.shadow.camera.far = 180;
-    moonLight.shadow.camera.left = -68;
-    moonLight.shadow.camera.right = 68;
-    moonLight.shadow.camera.top = 68;
-    moonLight.shadow.camera.bottom = -68;
-    moonLight.shadow.bias = -0.0008;
+    moonLight.shadow.camera.left = -64;
+    moonLight.shadow.camera.right = 64;
+    moonLight.shadow.camera.top = 64;
+    moonLight.shadow.camera.bottom = -64;
+    moonLight.shadow.bias = -0.0004;
     scene.add(moonLight);
 
     fireLight = new THREE.PointLight(0xff9b4a, 2.5, 32, 1.5);
     fireLight.position.set(0, 2.8, 0);
     scene.add(fireLight);
 
-    roseLight = new THREE.PointLight(0x8eaeff, 1.8, 34, 1.5);
+    roseLight = new THREE.PointLight(0xc2a8ff, 1.9, 34, 1.5);
     roseLight.position.set(0, 12, -46);
     scene.add(roseLight);
 
@@ -1407,6 +1869,16 @@
     buildGothicArchitecture();
     buildEntitiesAndEffects();
     applyMoodVisuals(currentMoodId);
+
+    // 初始直接定位高俯视机位，避免开场镜头剧烈飞入
+    const horiz = Math.cos(camState.pitch) * camState.dist;
+    camera.position.set(
+      player.x + Math.sin(camState.yaw) * horiz,
+      player.y + 1.4 + Math.sin(camState.pitch) * camState.dist,
+      player.z + Math.cos(camState.yaw) * horiz
+    );
+    camState.lookAt.set(player.x, player.y + 0.9, player.z);
+    camera.lookAt(camState.lookAt);
 
     resize();
     bindEvents();
